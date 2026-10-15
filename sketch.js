@@ -16,6 +16,11 @@
   var dpr = 1;
   var particles = [];
 
+  // 鼠标位置（EMA 平滑后的牵引中心）
+  var mouse = { x: 0, y: 0, tx: 0, ty: 0, active: false };
+  var GATHER_RADIUS = 200;   // 聚集影响半径（像素）
+  var GATHER_PULL = 26;      // 聚集牵引强度（像素 / 秒，边缘衰减到 0）
+
   /* ---------- 工具函数 ---------- */
   function rand(min, max) {
     return min + Math.random() * (max - min);
@@ -105,6 +110,12 @@
 
     ctx.clearRect(0, 0, W, H);
 
+    // 牵引中心向真实鼠标位置平滑跟随（EMA），避免顿挫
+    if (mouse.active) {
+      mouse.x += (mouse.tx - mouse.x) * Math.min(dt * 6, 1);
+      mouse.y += (mouse.ty - mouse.y) * Math.min(dt * 6, 1);
+    }
+
     for (var i = 0; i < particles.length; i++) {
       var p = particles[i];
 
@@ -112,6 +123,20 @@
       var sway = (now / p.driftPeriod) * Math.PI * 2 + p.driftPhase;
       p.x += (p.vx + Math.cos(sway) * 4.5) * dt;
       p.y += (p.vy + Math.sin(sway) * 3.5) * dt;
+
+      // 鼠标附近的轻微聚集：越靠近牵引力越强，柔和地向鼠标靠拢
+      if (mouse.active) {
+        var dx = mouse.x - p.x;
+        var dy = mouse.y - p.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 1 && dist < GATHER_RADIUS) {
+          var pull = GATHER_PULL * (1 - dist / GATHER_RADIUS);
+          pull *= pull / GATHER_PULL;   // 平方衰减，远处几乎不受影响
+          p.x += (dx / dist) * pull * dt;
+          p.y += (dy / dist) * pull * dt;
+        }
+      }
+
       if (p.x < -8) p.x = W + 8; else if (p.x > W + 8) p.x = -8;
       if (p.y < -8) p.y = H + 8; else if (p.y > H + 8) p.y = -8;
 
@@ -124,6 +149,22 @@
   /* ---------- 启动 ---------- */
   resize();
   window.addEventListener("resize", resize);
+
+  // 鼠标移动：更新牵引目标；移出窗口：停止聚集
+  window.addEventListener("mousemove", function (e) {
+    mouse.tx = e.clientX;
+    mouse.ty = e.clientY;
+    if (!mouse.active) {
+      // 首次进入直接从当前位置开始，避免从 (0,0) 飞过来
+      mouse.x = mouse.tx;
+      mouse.y = mouse.ty;
+      mouse.active = true;
+    }
+  });
+  document.addEventListener("mouseleave", function () {
+    mouse.active = false;
+  });
+
   requestAnimationFrame(function (now) {
     last = now;
     requestAnimationFrame(tick);
