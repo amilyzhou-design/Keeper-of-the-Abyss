@@ -1,0 +1,177 @@
+/* ============================================
+   深渊牧光者 · 开屏页
+   基准画布 1440 × 1024，全部尺寸用 vmin 等比缩放
+   ============================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  /* 近黑深蓝底 + 中央微微泛亮的径向渐变 */
+  background:
+    radial-gradient(ellipse 120% 90% at 50% 38%,
+      #081423 0%,
+      #050e1a 45%,
+      #030810 100%);
+  background-color: #030810;
+  font-family: "Segoe UI Light", "Helvetica Neue", "PingFang SC",
+    "Microsoft YaHei Light", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* 粒子画布铺满全屏，置于文字下层 */
+#sea {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ---------- 整体排版 ----------
+   高保真图中内容纵向跨度约为 25% → 72%，
+   整体接近垂直居中，用 flex 列布局实现 */
+.screen {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  transform: translateY(-1vmin); /* 内容中心略高于几何中心，贴合原图 */
+}
+
+/* ---------- 主标题 ---------- */
+.title {
+  font-weight: 200;
+  font-size: 7.4vmin;              /* ≈76px @1024h */
+  line-height: 0.96;
+  color: #e8f4ff;
+  letter-spacing: 0.26em;
+  /* letter-spacing 会在末尾多出一个字距，右移补偿保持视觉居中 */
+  text-indent: 0.26em;
+  text-shadow: 0 0 3.2vmin rgba(150, 205, 250, 0.18);
+}
+
+.title-line {
+  display: block;
+  white-space: nowrap;
+}
+
+/* ---------- 中文副标题 ---------- */
+.subtitle {
+  margin-top: 2.2vmin;
+  font-weight: 300;
+  font-size: 2vmin;                /* ≈20px */
+  letter-spacing: 1.05em;          /* 超宽字距 */
+  text-indent: 1.05em;
+  color: rgba(210, 228, 244, 0.55);
+}
+
+/* ---------- 英文标语 ---------- */
+.tagline {
+  margin-top: 3vmin;
+  font-weight: 300;
+  font-size: 1.32vmin;             /* ≈13.5px */
+  line-height: 2;
+  letter-spacing: 0.12em;
+  text-indent: 0.12em;
+  color: rgba(175, 192, 208, 0.48);
+}
+
+/* ---------- DIVE IN 圆形按钮 ---------- */
+.dive-btn {
+  margin-top: 9.4vmin;
+  width: 11.7vmin;                 /* ≈120px */
+  height: 11.7vmin;
+  border-radius: 50%;
+  border: 1px solid rgba(165, 210, 240, 0.34);
+  background: radial-gradient(circle,
+      rgba(100, 170, 220, 0.07) 0%,
+      rgba(100, 170, 220, 0.02) 55%,
+      transparent 75%);
+  color: rgba(232, 244, 255, 0.85);
+  font-family: inherit;
+  font-weight: 300;
+  font-size: 1.5vmin;              /* ≈15px */
+  letter-spacing: 0.38em;
+  text-indent: 0.38em;
+  cursor: pointer;
+  position: relative;
+  /* 常态辉光：外发光 + 内发光，保持微弱 */
+  box-shadow:
+    0 0 1.6vmin rgba(120, 195, 245, 0.11),
+    inset 0 0 1.2vmin rgba(120, 195, 245, 0.07);
+  animation: btnBreath 4.6s ease-in-out infinite;
+  transition: transform 0.35s ease;
+}
+
+/* 按钮外围的柔光晕（伪元素，随按钮一起呼吸） */
+.dive-btn::before {
+  content: "";
+  position: absolute;
+  inset: -2.6vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle,
+      rgba(110, 185, 235, 0.055) 0%,
+      rgba(110, 185, 235, 0.02) 45%,
+      transparent 70%);
+  animation: haloBreath 4.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.dive-btn:hover {
+  transform: scale(1.045);
+  border-color: rgba(195, 228, 252, 0.62);
+  color: #f2f9ff;
+  box-shadow:
+    0 0 4vmin rgba(135, 205, 250, 0.38),
+    inset 0 0 2.4vmin rgba(135, 205, 250, 0.18);
+}
+
+.dive-btn:active {
+  transform: scale(0.98);
+}
+
+/* 圆环辉光呼吸：4.6s 一个明暗周期 */
+@keyframes btnBreath {
+  0%, 100% {
+    border-color: rgba(165, 210, 240, 0.28);
+    box-shadow:
+      0 0 1.2vmin rgba(120, 195, 245, 0.09),
+      inset 0 0 1vmin rgba(120, 195, 245, 0.05);
+  }
+  50% {
+    border-color: rgba(195, 228, 252, 0.52);
+    box-shadow:
+      0 0 2.8vmin rgba(135, 205, 250, 0.24),
+      inset 0 0 1.9vmin rgba(135, 205, 250, 0.12);
+  }
+}
+
+/* 外围光晕同步呼吸 */
+@keyframes haloBreath {
+  0%, 100% { opacity: 0.45; transform: scale(0.96); }
+  50%      { opacity: 1;    transform: scale(1.04); }
+}
+
+/* ---------- 小屏适配 ---------- */
+@media (max-aspect-ratio: 3/4) {
+  /* 竖屏（手机）：vmin 取自宽度，标题不至于过大 */
+  .title    { font-size: 8.6vmin; }
+  .dive-btn { width: 26vmin; height: 26vmin; font-size: 3.4vmin; }
+  .subtitle { font-size: 4.4vmin; }
+  .tagline  { font-size: 3vmin; }
+}
