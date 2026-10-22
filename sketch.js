@@ -11,7 +11,7 @@
    · ignited  火种稳定燃烧；点亮后缓缓缩小成一小团常明灯火
    · awaken   阶段一 · 苏醒（萤火级微光：光灵与光尘同量级、数量少、运动慢）
               火种即掌心光晕：手入镜时贴手跟随，检测不到手时回归屏幕中心
-              beat 1 第一只光灵：试探游来 → 环游两圈 → 安心停留，猛动受惊
+              beat 1 第一只光灵：试探游来 → 环游两圈 → 安心停留，环游后半段即可唤醒同伴
               beat 2 星散苏醒：张手唤醒沉睡光点（由粒子海转化），握拳退散
               beat 3 首次共鸣：20 只共鸣闪光 + 群体环流一圈 → 无缝滑入阶段二
    · herd     阶段二 · 放牧：4800×3200 世界地图，宽、窄两条曲折长通道。
@@ -72,7 +72,7 @@
   var DIVE_DURATION = 3.4;            // 下潜过渡总时长（秒）
   var EMBER_FADEIN_AT = 2.1;          // 火种开始淡入的时刻
   var IGNITE_DURATION = 1.5;          // 点亮演出时长
-  var BEAT1_DELAY = 1.2;              // 点亮后第一只光灵登场的延迟
+  var BEAT1_DELAY = 0.8;              // 点亮后稍歇，第一只光灵更早登场
 
   var W = 0, H = 0, dpr = 1;
   var particles = [];
@@ -522,6 +522,13 @@
   };
   var resonanceFlash = 0; // 首次共鸣的全屏冷白闪光包络
   var BEAT2_TARGET = 20;  // 阶段一推进条件：群体 20 只
+  var P1_TIMING = {
+    soloOrbitTurns: 1.5, // 第一只环游约一圈半后，同伴即可苏醒；它仍继续完成两圈
+    gatherHold: 0.6,     // 张手保持多久开始唤醒（秒）
+    wakeInterval: 0.55,  // 后续光灵逐只出现的间隔（秒）
+    resonancePause: 1.0, // 共鸣闪光后的停顿（秒）
+    groupOrbitSeconds: 3.2 // 最后群体环流一圈的时长（秒）
+  };
 
   function newHeroState(name) {
     return {
@@ -584,6 +591,11 @@
       var homeY = tp.y + Math.sin(ang) * orbitR;
       s.vx = lerp(s.vx, Math.cos(tang) * spO + (homeX - s.x) * 1.8, dt * 3.5);
       s.vy = lerp(s.vy, Math.sin(tang) * spO + (homeY - s.y) * 1.8, dt * 3.5);
+      // 同伴提前加入，第一只继续环游；保留完整动作而减少独自等待。
+      if (P1.beat === 1 && !st.doneNotified && st.orbited >= Math.PI * 2 * P1_TIMING.soloOrbitTurns) {
+        st.doneNotified = true;
+        startBeat2();
+      }
       if (st.orbited >= Math.PI * 4) changeHero(s, "stay");
     } else if (st.name === "stay") {
       // 安心停留：光晕近旁的 8 字漂浮
@@ -592,7 +604,7 @@
       var hy = tp.y + Math.sin(st.t * 1.8) * orbitR * 0.18;
       s.vx = lerp(s.vx, (hx - s.x) * 2.2, dt * 3);
       s.vy = lerp(s.vy, (hy - s.y) * 2.2, dt * 3);
-      if (st.t > 2.5 && !st.doneNotified) { st.doneNotified = true; startBeat2(); }
+      if (P1.beat === 1 && st.t > 2.5 && !st.doneNotified) { st.doneNotified = true; startBeat2(); }
     } else if (st.name === "startle") {
       // 受惊退开：逃窜减速，镇定后重新试探接近
       st.t += dt;
@@ -670,6 +682,7 @@
   }
 
   function startBeat2() {
+    if (P1.beat >= 2) return; // 第一只继续环游/驻留时不重复重置唤醒计时
     P1.beat = 2;
     P1.beatClock = 0;
     P1.gatherHold = 0;
@@ -737,16 +750,16 @@
     } else if (g === "Disperse") {
       P1.gatherHold = 0;
       scatterSpirits(tp);
-      if (P1.gatherHold < 0.8) P1.icon = "gather";
+      if (P1.gatherHold < P1_TIMING.gatherHold) P1.icon = "gather";
     } else {
       P1.gatherHold = Math.max(P1.gatherHold - dt * 0.5, 0);   // 中性缓慢衰减
     }
 
-    // 张手保持 0.8s 后进入苏醒流：每 0.7s 唤醒一只
-    if (P1.gatherHold >= 0.8) {
+    // 张手保持 0.6s 后进入苏醒流：每 0.55s 唤醒一只。
+    if (P1.gatherHold >= P1_TIMING.gatherHold) {
       P1.icon = null;
       P1.wakeTimer += dt;
-      if (P1.wakeTimer >= 0.7 && spirits.length < BEAT2_TARGET) {
+      if (P1.wakeTimer >= P1_TIMING.wakeInterval && spirits.length < BEAT2_TARGET) {
         P1.wakeTimer = 0;
         wakeOneSpirit();
       }
@@ -756,10 +769,10 @@
   }
 
   function updateBeat3(dt) {
-    // 共鸣闪光（1.2s）后：群体绕光晕同步环流一圈（3.5s）
-    if (P1.beatClock > 1.2 && !P1.groupOrbitDone) {
-      P1.orbitRot += dt * (Math.PI * 2 / 3.5);
-      P1.groupOrbitAcc = (P1.groupOrbitAcc || 0) + dt * (Math.PI * 2 / 3.5);
+    // 共鸣闪光稍歇后，群体完整环流一圈，再进入阶段二。
+    if (P1.beatClock > P1_TIMING.resonancePause && !P1.groupOrbitDone) {
+      P1.orbitRot += dt * (Math.PI * 2 / P1_TIMING.groupOrbitSeconds);
+      P1.groupOrbitAcc = (P1.groupOrbitAcc || 0) + dt * (Math.PI * 2 / P1_TIMING.groupOrbitSeconds);
       if (P1.groupOrbitAcc >= Math.PI * 2) {
         P1.groupOrbitDone = true;
         P1.beat = 4;                          // 阶段一完成
