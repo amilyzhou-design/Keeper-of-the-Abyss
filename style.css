@@ -13,6 +13,7 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
@@ -36,7 +37,86 @@ body {
   width: 100%;
   height: 100%;
   display: block;
+  touch-action: none;
 }
+
+/* 阶段二：文字短暂出现后退入背景，中央始终留给原有微光。 */
+.herd-hud[hidden] { display: none; }
+.camera-status[hidden], #camera-retry[hidden] { display: none; }
+.camera-status {
+  position: fixed;
+  z-index: 5;
+  left: 50%;
+  bottom: max(22px, calc(env(safe-area-inset-bottom) + 14px));
+  transform: translateX(-50%);
+  width: min(88vw, 560px);
+  padding: 12px 18px;
+  border: 1px solid rgba(160, 195, 220, .15);
+  border-radius: 12px;
+  background: rgba(3, 8, 15, .85);
+  color: #aec5d5;
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+}
+#camera-retry {
+  margin-top: 8px;
+  padding: 6px 16px;
+  border: 1px solid #446377;
+  border-radius: 6px;
+  color: #d9e9f4;
+  background: #132737;
+  cursor: pointer;
+  font: inherit;
+}
+.herd-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  color: rgba(193, 221, 238, .7);
+  animation: herdArrival 2s ease both;
+}
+.herd-heading {
+  position: absolute;
+  top: max(30px, env(safe-area-inset-top));
+  left: max(32px, env(safe-area-inset-left));
+  transition: opacity 1.8s ease;
+}
+.herd-chapter { font-size: 10px; letter-spacing: .24em; opacity: .62; }
+.herd-heading h2 { margin-top: 9px; font-size: 19px; letter-spacing: .35em; font-weight: 300; }
+.herd-progress {
+  position: absolute;
+  top: max(35px, env(safe-area-inset-top));
+  right: max(32px, env(safe-area-inset-right));
+  font-size: 11px;
+  letter-spacing: .2em;
+  opacity: .45;
+}
+.herd-hud:not([data-beat="2"]):not([data-beat="3"]):not([data-beat="4"]) .herd-progress { opacity: 0; }
+.herd-cue {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: max(12%, calc(env(safe-area-inset-bottom) + 28px));
+  text-align: center;
+  font-size: clamp(11px, 1.3vmin, 14px);
+  line-height: 1.8;
+  letter-spacing: .16em;
+  color: rgba(193, 221, 238, .65);
+  transition: opacity 1.8s ease;
+}
+.herd-hud.quiet .herd-heading { opacity: .32; }
+.herd-hud.quiet .herd-cue { opacity: 0; }
+@keyframes herdArrival { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 600px) {
+  .herd-heading { left: 22px; top: max(24px, env(safe-area-inset-top)); }
+  .herd-heading h2 { font-size: 16px; }
+  .herd-chapter { font-size: 8px; }
+  .herd-progress { right: 22px; top: max(28px, env(safe-area-inset-top)); }
+  .herd-cue { left: 8%; right: 8%; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) { .herd-hud { animation: none; } }
 
 /* ---------- 整体排版 ----------
    高保真图中内容纵向跨度约为 25% → 72%，
@@ -174,4 +254,89 @@ body {
   .dive-btn { width: 26vmin; height: 26vmin; font-size: 3.4vmin; }
   .subtitle { font-size: 4.4vmin; }
   .tagline  { font-size: 3vmin; }
+  .pinch-hint { font-size: 3.1vmin; }
 }
+
+/* ============================================
+   点击 DIVE IN 后的离场动画（下潜转场 · 方案 5.3）
+   人向下潜，世界相对向上掠：标题组依次上飘淡出
+   ============================================ */
+.screen.leaving {
+  pointer-events: none;   /* 转场期间禁止再次点击 */
+}
+
+/* 主标题：上飘 + 字距缓缓散开，最后一个离场 */
+.screen.leaving .title {
+  animation: titleRise 1.7s cubic-bezier(0.45, 0, 0.8, 0.4) 0.15s forwards;
+}
+
+/* 副标题与标语：纯上飘淡出，依次先行 */
+.screen.leaving .subtitle {
+  animation: riseFade 1.4s cubic-bezier(0.45, 0, 0.8, 0.4) 0.28s forwards;
+}
+.screen.leaving .tagline {
+  animation: riseFade 1.3s cubic-bezier(0.45, 0, 0.8, 0.4) 0.40s forwards;
+}
+
+/* 按钮：最先熄灭，微微下沉收缩 */
+.screen.leaving .dive-btn {
+  animation: sinkFade 0.7s ease-out forwards;
+}
+
+@keyframes titleRise {
+  to {
+    opacity: 0;
+    transform: translateY(-14vmin);
+    letter-spacing: 0.55em;
+    text-indent: 0.55em;
+  }
+}
+
+@keyframes riseFade {
+  to {
+    opacity: 0;
+    transform: translateY(-10vmin);
+  }
+}
+
+@keyframes sinkFade {
+  to {
+    opacity: 0;
+    transform: scale(0.86) translateY(1.5vmin);
+  }
+}
+
+/* ============================================
+   捏合教学提示（开发期临时，接入捏合识别后可删）
+   ============================================ */
+.pinch-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 16%;
+  transform: translateX(-50%);
+  z-index: 2;
+  margin: 0;
+  font-size: 1.5vmin;
+  font-weight: 300;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  white-space: nowrap;
+  color: rgba(255, 243, 214, 0.4);   /* 与火种同色的暖白 */
+  opacity: 0;
+  transition: opacity 1.6s ease;
+  pointer-events: none;
+}
+
+.pinch-hint.show {
+  opacity: 1;
+  animation: hintBreath 3.8s ease-in-out 1.6s infinite;
+}
+
+@keyframes hintBreath {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+
+/* 长通道进度：手机上让航道、百分比与光尘自然换行。 */
+.herd-progress { max-width: 48vw; white-space: normal; text-align: right; line-height: 1.7; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .herd-progress { font-size: 11px; max-width: 43vw; } .herd-cue { max-width: 88vw; line-height: 1.9; } }

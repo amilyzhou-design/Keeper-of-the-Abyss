@@ -2,8 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>深渊牧光者 · Keeper of the Abyss</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,10 +25,27 @@
       with your bare hands.
     </p>
 
-    <button class="dive-btn" type="button" aria-label="Dive In">
+    <button class="dive-btn" id="dive-btn" type="button" aria-label="Dive In">
       <span class="dive-text">DIVE&nbsp;IN</span>
     </button>
   </main>
+
+  <!-- 捏合教学提示（开发期临时：接入捏合手势识别后可删除，见 sketch.js） -->
+  <p class="pinch-hint" id="pinch-hint" aria-hidden="true">拇指 + 食指 · 轻轻捏合</p>
+
+  <aside class="camera-status" id="camera-status" hidden aria-label="摄像头状态">
+    <p id="camera-message" role="status" aria-live="polite"></p>
+    <button id="camera-retry" type="button" hidden>重试摄像头</button>
+  </aside>
+
+  <section class="herd-hud" id="herd-hud" aria-label="放牧旅程" hidden>
+    <div class="herd-heading">
+      <span class="herd-chapter">02 / THE DESCENT</span>
+      <h2 id="herd-title">放牧</h2>
+    </div>
+    <span class="herd-progress" id="herd-progress" aria-label="当前航道与旅程进度">0%</span>
+    <p class="herd-cue" id="herd-cue" aria-live="polite"></p>
+  </section>
 
   <script src="sketch.js"></script>
 </body>
