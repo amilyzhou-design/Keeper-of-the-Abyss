@@ -18,11 +18,11 @@
               入场选择航道；掌心左右控制前进/停留，上下自由探索水道。
               光灵各自游动并受火种牵引，捏合时才收拢；两水道内部随机采尘。
               黑影在双缝途中掠过：捏合防护、张手散开、蓄力后释放诱饵。
-              横竖屏共享纹理、世界位置和进度；碰撞取自主礁石 PNG 的透明度。
+              横竖屏共享纹理、世界位置和进度；碰撞取自主礁石 WebP 的透明度。
 
    交付结构（课程三文件约束）：index.html / style.css / sketch.js
    + gesture_recognizer.task（现有手势模型数据文件，非代码）。
-   四张 PNG 保存在同级 assets/images/ 文件夹，路线数据内嵌在 sketch.js。
+   阶段二与阶段三 WebP 保存在同级 assets/images/ 文件夹，路线数据内嵌在 sketch.js。
    MediaPipe 运行时为 CDN 库引用（方案 7.2：库引用不占文件数）。
 
    【临时调试钩子】ritual 场景下点击画面 = 模拟捏合点亮；
@@ -59,11 +59,12 @@
     return "rgba(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + "," + a.toFixed(3) + ")";
   }
   function bgColor() {          // 当前深渊底色（随阶段过渡渐变）
-    return mixRgb(hexRgb(COLOR.abyss), COLOR_P2.bg, morphT);
+    var base = mixRgb(hexRgb(COLOR.abyss), COLOR_P2.bg, morphT);
+    return scene === SCENE.BLOOM ? mixRgb(base, [8,24,38], bloomMix) : base;
   }
 
   /* ---------- 场景状态机 ---------- */
-  var SCENE = { TITLE: 0, DIVING: 1, RITUAL: 2, IGNITING: 3, IGNITED: 4, AWAKEN: 5, HERD: 6 };
+  var SCENE = { TITLE: 0, DIVING: 1, RITUAL: 2, IGNITING: 3, IGNITED: 4, AWAKEN: 5, HERD: 6, BLOOM: 7 };
   var scene = SCENE.TITLE;
   var sceneClock = 0;                 // 当前场景已进行的秒数
   var TIME_SCALE = 1;                 // 调试倍速（__abyss.setTimeScale）
@@ -115,7 +116,7 @@
   }
 
   function resize() {
-    if (scene === SCENE.HERD) { resizePhase2(); return; }
+    if (scene === SCENE.HERD || scene === SCENE.BLOOM) { resizePhase2(); return; }
     dpr = window.devicePixelRatio || 1;
     W = window.innerWidth;
     H = window.innerHeight;
@@ -159,8 +160,8 @@
       ember.sparks.concat(ember.burst).forEach(function (s) { remap(s, true); });
       remap(hand.cursor, false);
       hand.cursor.px = hand.cursor.x; hand.cursor.py = hand.cursor.y; hand.cursor.speed = 0;
-      projectP2Encounter();
-      spirits.forEach(projectHerdSpirit);
+      if (scene === SCENE.BLOOM) spirits.forEach(projectBloomSpirit);
+      else { projectP2Encounter(); spirits.forEach(projectHerdSpirit); }
       P2.frameShift.x = 0; P2.frameShift.y = 0;
       particles.forEach(function (p) { p.x *= W / oldW; p.y *= H / oldH; });
       if (savedTrail) {
@@ -232,6 +233,11 @@
   // 缩小 —— 点亮后缓缓收拢成一小团常明灯火（1 → 0.45）
   // 阶段一 —— 火种直接成为掌心光晕：手入镜时贴手跟随，检测不到手时回归屏幕中心
   function updateEmberLife(dt) {
+    if (scene === SCENE.BLOOM) {
+      var pos = bloomScreen(P3.leader.x,P3.leader.y);
+      ember.x=pos.x;ember.y=pos.y;ember.scale+=(.45-ember.scale)*Math.min(dt,1);
+      ember.speed=0;return;
+    }
     if (scene === SCENE.HERD && P2.leader) {
       var worldPos = p2Screen(P2.leader.x, P2.leader.y);
       ember.x = worldPos.x; ember.y = worldPos.y;
@@ -299,7 +305,7 @@
   /* ---------- 火种层绘制（加色混合发光；阶段一中火种即掌心光晕） ---------- */
   function drawEmberLayer(nowS, dt) {
     var pos = emberPos();
-    var awaken = scene === SCENE.AWAKEN || scene === SCENE.HERD;   // 阶段一/二：火种即掌心光晕
+    var awaken = scene === SCENE.AWAKEN || scene === SCENE.HERD || scene === SCENE.BLOOM;   // 阶段一/二：火种即掌心光晕
     pos.y += Math.sin(nowS * 0.6) * H * (awaken ? 0.002 : 0.006);   // 掌晕几乎不沉浮
 
     // 点亮演出期间的亮度覆盖：0.35s 冲顶 → 回落到稳态
@@ -469,6 +475,12 @@
     var cHalo1 = mixRgb([191, 217, 232], [79, 195, 247], formT);
     var cHalo2 = mixRgb([150, 195, 235], [36, 110, 170], formT);
     var cCore  = mixRgb([234, 246, 255], [225, 245, 255], formT);
+    if(scene===SCENE.BLOOM && s.bloomColor){
+      cHalo1=mixRgb(cHalo1,s.bloomColor,bloomMix);
+      cHalo0=mixRgb(cHalo0,mixRgb(s.bloomColor,[255,255,255],.45),bloomMix);
+      cHalo2=mixRgb(cHalo2,s.bloomColor.map(function(v){return v*.5;}),bloomMix);
+      cCore=mixRgb(cCore,mixRgb(s.bloomColor,[255,255,255],.72),bloomMix);
+    }
 
     ctx.save();
     ctx.translate(s.x, s.y);
@@ -489,6 +501,12 @@
       var bl = coreR * (1 + 1.6 * formT);
       var bw = Math.max(coreR * (1 - 0.3 * formT), 0.6);
       var wag = Math.sin(nowS * 9 + s.wanderPh * 4) * bl * 0.45;
+      if(scene===SCENE.BLOOM){
+        ctx.fillStyle=rgbaStr(cHalo1,.22*lit*bloomMix);ctx.beginPath();
+        ctx.moveTo(-bl*.5,0);ctx.quadraticCurveTo(-bl*1.5,-bw*2.8+wag*.2,-bl*2.2,-bw*2.1+wag);
+        ctx.quadraticCurveTo(-bl*1.6,0,-bl*2.2,bw*2.1+wag);
+        ctx.quadraticCurveTo(-bl*1.4,bw*2.8+wag*.2,-bl*.5,0);ctx.fill();
+      }
       ctx.strokeStyle = rgbaStr(cHalo1, clamp(0.55 * lit, 0, 1));
       ctx.lineWidth = Math.max(bw * 0.55, 0.5);
       ctx.lineCap = "round";
@@ -797,7 +815,7 @@
      ============================================ */
   /* ============================================
      阶段二 · 放牧：共享水彩世界 / 两道礁缝 / 掠食者两连
-     所有图片为本 JS 尾部的 data URI；不引入额外代码或图片文件。
+     图片从 assets/images/ 加载，路线数据内嵌在本文件。
      光灵仍调用原 drawSpirit()，光晕、亮芯、摆尾、呼吸与拖尾保持原样。
      ============================================ */
   // 阶段二：自由游群、可上下探索的双水道、途中掠影与随机采尘。
@@ -899,6 +917,7 @@
 
   function enterHerd() {
     initPhase2Art(); resetPhase2();
+    herdHud.dataset.phase="2";document.querySelector(".herd-chapter").textContent="02 / THE DESCENT";
     scene = SCENE.HERD; sceneClock = 0;
     var u = p2Unit(), pos = emberPos();
     P2.leader = { x: -520, y: p2RouteAt(0).y };
@@ -1228,6 +1247,18 @@
         (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.shadow.pass === 2 ? "黑影徘徊：捏合蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，捏合收拢光群") :
         P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "上下移动掌心，自由探索水道；靠近光尘让光灵进食" : "手放上半屏选宽缝，下半屏选窄缝；移向右侧启程";
     }
+    if(P2.progress>.55 && !P3Art.error && !bloomRuntimeError) initPhase3Art();
+    if(P2.beat===4){
+      if(spirits.length<15){
+        var extra=makeSpirit(ember.x,ember.y);extra.bornT=0;spirits.push(extra);
+        extra.wx=P2.leader.x+rand(-65,20);extra.wy=P2.leader.y+rand(-45,45);
+        extra.wvx=0;extra.wvy=0;extra.swimClock=.5;extra.swimX=extra.swimTX=0;extra.swimY=extra.swimTY=0;
+      }
+      if(P3Art.ready && bloomP5 && P2.beatClock>1.2){enterBloom();return;}
+      if(!P3Art.error && !bloomRuntimeError)initPhase3Art();
+      if(herdCue)herdCue.textContent=P3Art.error||bloomRuntimeError?"海盆尚未浮现，请重试加载旅程素材":"狭缝渐远，前方的海盆正在浮现…";
+      document.getElementById("journey-status").hidden=!(P3Art.error||bloomRuntimeError);
+    }
     P2.completion = Math.max(0, P2.completion - dt * .25);
     if (herdHud) herdHud.classList.toggle("quiet", active && !P2.shadow && !P2.blocked && P2.cueClock > 12);
   }
@@ -1280,6 +1311,371 @@
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(l.x, l.y, r * 5, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#fff8e7"; ctx.beginPath(); ctx.arc(l.x, l.y, r, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+  }
+
+
+  /* ============================================
+     阶段三 · 繁衍：光尘雪 → 双群混色 → 节拍增殖。
+     p5 实例负责光尘、漩涡流线、脉冲涟漪；既有 Canvas 保留光灵视觉。
+     只有主 tick 推进模拟，p5.noLoop 避免双重动画时钟。
+     ============================================ */
+  var P3 = {}, P3Art = { images: {}, ready: false, loading: false, error: null };
+  var bloomMix = 0, bloomBackdrop = null;
+  var bloomP5 = null, bloomFx = null, bloomRuntime = null, bloomRuntimeError = null;
+  var bloomAudio = null, bloomAudioEnabled = true;
+  var P3_PALETTE = [[79,195,247], [155,126,222], [242,193,78], [106,224,174]];
+  function bloomAddColor(a,b) {
+    var sum=a.map(function(v,i){return v+b[i];}), peak=Math.max.apply(Math,sum);
+    return sum.map(function(v){return Math.round(v/peak*255);});
+  }
+  var P3_FILES = { base: 'assets/images/p3_base.webp', far: 'assets/images/p3_far.webp',
+    basin: 'assets/images/p3_basin.webp', front: 'assets/images/p3_foreground.webp' };
+
+  function resetPhase3() {
+    P3 = { beat: 0, clock: 0, beatClock: 0, activeTime: 0, collected: 0, mixed: 0,
+      dust: [], rings: [], leader: {x:900,y:560}, camera:{x:900,y:560},
+      prevCamera:{x:900,y:560}, frameShift:{x:0,y:0}, vortex:0, turn:0, path:[],
+      split:0, splitReady:false, splitHold:0, mergeHold:0, lastSide:0, sideAt:-10,
+      splitAt:0, pulse:0, beatIndex:-1, rhythmHits:0, gesture:'Neutral', gestureAt:0,
+      grow:0, dustCredit:0, preview:false, target:60, complete:false, completion:0 };
+    bloomMix = 0; bloomBackdrop = null;
+    var sound = document.getElementById('bloom-sound');
+    if (sound) sound.hidden = true;
+  }
+
+  function prepareBloomAudio() {
+    // 仅由已授权的入场点击/资源重试解锁，不申请麦克风。
+    if (!bloomAudioEnabled) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!bloomAudio && AC) bloomAudio = new AC();
+      if (bloomAudio && bloomAudio.state === 'suspended') bloomAudio.resume().catch(function(){});
+    } catch (_) { bloomAudio = null; }
+  }
+  function bloomTone() {
+    if (!bloomAudioEnabled || !bloomAudio || bloomAudio.state !== 'running') return;
+    var osc = bloomAudio.createOscillator(), gain = bloomAudio.createGain(), t = bloomAudio.currentTime;
+    osc.type = 'sine'; osc.frequency.value = [261.63,329.63,392,523.25][P3.beatIndex % 4];
+    gain.gain.setValueAtTime(0,t); gain.gain.linearRampToValueAtTime(.026,t+.012);
+    gain.gain.exponentialRampToValueAtTime(.0001,t+.4);
+    osc.connect(gain); gain.connect(bloomAudio.destination); osc.start(t); osc.stop(t+.42);
+    osc.onended = function(){osc.disconnect();gain.disconnect();};
+  }
+  function loadBloomRuntime() {
+    if (bloomRuntime) return bloomRuntime;
+    bloomRuntimeError = null;
+    bloomRuntime = new Promise(function(resolve,reject){
+      var sources = ['https://cdn.jsdelivr.net/npm/p5@1.11.11/lib/p5.min.js',
+        'https://unpkg.com/p5@1.11.11/lib/p5.min.js'];
+      function start() {
+        try {
+          new window.p5(function(p){
+            p.setup = function(){p.noCanvas();p.noLoop();bloomP5=p;resolve(p);};
+          });
+        } catch(e){reject(e);}
+      }
+      function attempt(index) {
+        if (window.p5) {start();return;}
+        if (index >= sources.length) {reject(new Error('p5.js 未能加载'));return;}
+        var script=document.createElement('script'), settled=false;
+        var timer=setTimeout(failed,12000);
+        function failed(){if(settled)return;settled=true;clearTimeout(timer);script.remove();attempt(index+1);}
+        script.src=sources[index];script.async=true;script.onerror=failed;
+        script.onload=function(){if(settled)return;settled=true;clearTimeout(timer);if(window.p5)start();else attempt(index+1);};
+        document.head.appendChild(script);
+      }
+      attempt(0);
+    }).catch(function(e){bloomRuntime=null;bloomRuntimeError=e;throw e;});
+    return bloomRuntime;
+  }
+  function initPhase3Art() {
+    if (P3Art.loading || (P3Art.ready && bloomP5)) return;
+    P3Art.loading=true; P3Art.error=null;
+    var images = Promise.all(Object.keys(P3_FILES).map(function(key){
+      return new Promise(function(resolve,reject){
+        var im=new Image();
+        im.onload=function(){resolve([key,im]);};
+        im.onerror=function(){reject(new Error('无法加载 '+P3_FILES[key]));};
+        im.src=P3_FILES[key];
+      });
+    }));
+    Promise.all([images,loadBloomRuntime()]).then(function(results){
+      results[0].forEach(function(pair){P3Art.images[pair[0]]=pair[1];});
+      P3Art.ready=true;P3Art.loading=false;P3Art.error=null;
+      document.getElementById('journey-status').hidden=true;
+    }).catch(function(error){
+      P3Art.ready=false;P3Art.loading=false;P3Art.error=error;
+      console.warn('繁衍资源加载失败',error);
+    });
+  }
+  function bloomScreen(x,y) {
+    return {x:W/2+(x-P3.camera.x)*p2Unit(),y:H*.47+(y-P3.camera.y)*p2Unit()};
+  }
+  function projectBloomSpirit(s) {
+    var pos=bloomScreen(s.wx,s.wy);s.x=pos.x;s.y=pos.y;
+    s.vx=s.wvx*p2Unit();s.vy=s.wvy*p2Unit();
+  }
+  function bloomBounds() {
+    return {x:Math.min(670,W/p2Unit()*.42),y:Math.min(390,H/p2Unit()*.34)};
+  }
+  function seedBloomDust(topOnly) {
+    var b=bloomBounds();
+    return {x:900+rand(-b.x,b.x),y:topOnly?560-b.y-25:560+rand(-b.y,b.y),
+      vx:rand(-8,8),vy:rand(13,26),phase:rand(0,Math.PI*2),size:rand(.8,2.1)};
+  }
+  function enterBloom() {
+    if (scene===SCENE.BLOOM || !P3Art.ready || !bloomP5) return;
+    var u=p2Unit(), ep=emberPos();
+    // 捕获仍含旧光群的最后一帧；新光群仍在同一屏幕坐标，淡出时不会闪断。
+    var old=document.createElement('canvas');old.width=canvas.width;old.height=canvas.height;
+    var previousContext=ctx;ctx=old.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.fillStyle='#06121f';ctx.fillRect(0,0,W,H);drawFarReefs();drawReefs(performance.now()/1000);drawP2Layer(3);ctx=previousContext;
+    resetPhase3();bloomBackdrop=old;
+    P3.leader={x:900+(ep.x-W/2)/u,y:560+(ep.y-H*.47)/u};
+    P3.startCount=spirits.length;P3.target=Math.max(60,spirits.length*2);morphT=1;
+    spirits.forEach(function(s,i){
+      s.wx=900+(s.x-W/2)/u;s.wy=560+(s.y-H*.47)/u;
+      s.wvx=s.vx/u;s.wvy=s.vy/u;s.group=i%2;s.bloomColor=COLOR_P2.spirit.slice();
+      s.colorIndex=i%4;s.sizeGoal=rand(.7,1.3);s.shadowDim=1;s.straggleT=0;
+    });
+    for(var i=0;i<95;i++)P3.dust.push(seedBloomDust(false));
+    P2.scrollVX=0;P2.frameShift={x:0,y:0};P2.shadow=null;P2.lure=null;
+    scene=SCENE.BLOOM;sceneClock=0;
+    hand.secondary=null;
+    if(hand.recognizer && !hand.debugLock){
+      // 摄像头视频源与主手处理流程不变，仅阶段三允许第二只手。
+      Promise.resolve(hand.recognizer.setOptions({numHands:2})).catch(function(){/* 单手替代始终可用 */});
+    }
+    setBloomBeat(1);
+    document.getElementById('bloom-sound').hidden=false;
+    document.getElementById('journey-status').hidden=true;
+  }
+  function setBloomBeat(beat) {
+    P3.beat=beat;P3.beatClock=0;P3.grow=0;
+    herdHud.hidden=false;herdHud.dataset.phase='3';herdHud.dataset.beat=String(beat);
+    herdHud.classList.remove('quiet');
+    document.querySelector('.herd-chapter').textContent='03 / BLOOM';
+    herdTitle.textContent=['','光尘雪','颜色炼金','节拍脉冲','繁光初成'][beat];
+  }
+  function bloomBirth(parent) {
+    if(spirits.length>=P3.target || spirits.length>=120)return;
+    var s=makeSpirit(parent.x,parent.y,{size:rand(.7,1.3),bright:rand(.8,1.2)});
+    s.wx=parent.wx+rand(-14,14);s.wy=parent.wy+rand(-14,14);
+    s.wvx=parent.wvx+rand(-30,30);s.wvy=parent.wvy+rand(-30,30);
+    s.group=spirits.length%2;s.colorIndex=spirits.length%4;s.sizeGoal=s.size;
+    s.bloomColor=(parent.bloomColor||COLOR_P2.spirit).slice();
+    spirits.push(s);
+  }
+  function bloomRing(x,y,color) {P3.rings.push({x:x,y:y,age:0,color:color||[191,217,232]});}
+  function updateBloomInput(dt) {
+    var active=hand.present, b=bloomBounds();
+    if(P3.beat===4)return;
+    if(!active){P3.path=[];P3.lastSide=0;P3.splitHold=0;P3.mergeHold=0;return;}
+    var wx=P3.camera.x+(hand.cursor.x-W/2)/p2Unit();
+    var wy=P3.camera.y+(hand.cursor.y-H*.47)/p2Unit();
+    wx=clamp(wx,900-b.x,900+b.x);wy=clamp(wy,560-b.y,560+b.y*.8);
+    P3.leader.x+=(wx-P3.leader.x)*(1-Math.exp(-dt*4));
+    P3.leader.y+=(wy-P3.leader.y)*(1-Math.exp(-dt*4));
+    // 掌心轨迹的连续转角，配合最小行程，避免手抖触发漩涡。
+    var path=P3.path, prev=path[path.length-1];
+    if(!prev || Math.hypot(wx-prev.x,wy-prev.y)>9){
+      path.push({x:wx,y:wy,t:P3.clock});
+      while(path.length>30 || (path.length && P3.clock-path[0].t>2.2))path.shift();
+      var turn=0,length=0;
+      for(var i=2;i<path.length;i++){
+        var a=path[i-2],c=path[i-1],d=path[i];
+        var dx=c.x-a.x,dy=c.y-a.y,ex=d.x-c.x,ey=d.y-c.y;
+        turn+=normAngle(Math.atan2(ey,ex)-Math.atan2(dy,dx));length+=Math.hypot(ex,ey);
+      }
+      if(Math.abs(turn)>2.1 && length>110){P3.vortex=Math.min(1,P3.vortex+dt*5+.12);P3.turn=Math.sign(turn);}
+    }
+    if(P3.beat!==2)return;
+    if(P3.merging){P3.split=Math.max(0,P3.split-dt*.72);return;}
+    var nx=(hand.cursor.x/W-.5), side=Math.abs(nx)>.18?Math.sign(nx):0;
+    var second=hand.secondary && performance.now()/1000-hand.secondary.at<.3?hand.secondary:null;
+    var twoApart=second && Math.abs(second.x-hand.cursor.x)>W*.3;
+    if(twoApart || (side && P3.lastSide && side!==P3.lastSide && P3.clock-P3.sideAt<2.2)){
+      if(!P3.splitReady){P3.splitAt=P3.clock;P3.separated=false;}
+      P3.splitReady=true;P3.splitHold=1;
+    }
+    if(side && side!==P3.lastSide){P3.lastSide=side;P3.sideAt=P3.clock;}
+    var centered=Math.abs(nx)<.13;
+    var twoTogether=second && Math.abs(second.x-hand.cursor.x)<W*.2;
+    if(P3.splitReady){
+      P3.split+=(1-P3.split)*(1-Math.exp(-dt*2.8));
+      if((centered && !twoApart || twoTogether) && P3.separated && P3.clock-P3.splitAt>2.6)P3.mergeHold+=dt;
+      else P3.mergeHold=0;
+      if(P3.mergeHold>.55){P3.splitReady=false;P3.lastSide=0;P3.mergeHold=0;P3.merging=true;}
+    } else P3.split=Math.max(0,P3.split-dt*.72);
+  }
+  function updateBloomSpirit(s,dt,nowS) {
+    var b=bloomBounds(), pinched=hand.present&&hand.pinch.active;
+    var radius=pinched?32:(P3.beat===4?95:140);
+    var angle=s.orbitA+nowS*(.25+P3.vortex*.9)*(P3.turn||1);
+    var gx=P3.leader.x,gy=P3.leader.y;
+    if(P3.beat===2){
+      gx=900+(s.group?1:-1)*P3.split*b.x*.56;gy=560;
+      if(P3.splitReady && hand.secondary && performance.now()/1000-hand.secondary.at<.3){
+        var palms=[hand.cursor,hand.secondary].sort(function(a,b){return a.x-b.x;});
+        var palm=palms[s.group];
+        gx=clamp(P3.camera.x+(palm.x-W/2)/p2Unit(),900-b.x*.8,900+b.x*.8);
+        gy=clamp(P3.camera.y+(palm.y-H*.47)/p2Unit(),560-b.y*.7,560+b.y*.65);
+      }
+    }
+    if(P3.beat===4){gx=900;gy=560+b.y*.62;}
+    var tx=gx+Math.cos(angle+s.wanderPh)*radius*s.orbitR;
+    var ty=gy+Math.sin(angle*1.2+s.wanderPh)*radius*.7;
+    var ax=(tx-s.wx)*1.4,ay=(ty-s.wy)*1.4;
+    for(var i=0;i<spirits.length;i++){
+      var other=spirits[i];if(other===s)continue;
+      var dx=s.wx-other.wx,dy=s.wy-other.wy,d2=dx*dx+dy*dy;
+      if(d2>1&&d2<38*38){ax+=dx/d2*240;ay+=dy/d2*240;}
+    }
+    if(P3.vortex>.08){
+      var rx=s.wx-P3.leader.x,ry=s.wy-P3.leader.y;
+      ax+=(-ry*.9*(P3.turn||1)-rx*.25)*P3.vortex;
+      ay+=(rx*.9*(P3.turn||1)-ry*.25)*P3.vortex;
+    }
+    s.wvx=(s.wvx+ax*dt)*Math.exp(-dt*1.3);s.wvy=(s.wvy+ay*dt)*Math.exp(-dt*1.3);
+    var speed=Math.hypot(s.wvx,s.wvy),limit=230+P3.vortex*85;
+    if(speed>limit){s.wvx*=limit/speed;s.wvy*=limit/speed;}
+    s.wx=clamp(s.wx+s.wvx*dt,900-b.x,900+b.x);s.wy=clamp(s.wy+s.wvy*dt,560-b.y,560+b.y);
+    s.bornT+=dt;s.flash=Math.max(0,s.flash-dt*1.2);s.shadowDim=1;
+    s.size+=(s.sizeGoal-s.size)*Math.min(1,dt*.25);
+    var color=P3_PALETTE[s.colorIndex];
+    if(P3.beat===1)color=mixRgb(P3_PALETTE[0],color,clamp(P3.collected/22,0,1)*.7);
+    if(P3.beat===2)color=P3.split>.2?(s.group?P3_PALETTE[2]:P3_PALETTE[0]):(P3.mixed?P3.mixedColor:s.bloomColor);
+    s.bloomColor=mixRgb(s.bloomColor,color,Math.min(1,dt*.8));projectBloomSpirit(s);
+  }
+  function updatePhase3(dt,nowS) {
+    P3.clock+=dt;P3.beatClock+=dt;
+    bloomMix=clamp(bloomMix+dt/5.5,0,1);
+    if(bloomMix===1)bloomBackdrop=null;
+    var active=hand.present, g=active?currentGesture():'Neutral';
+    var inputReady=active && bloomMix>.6;
+    if(inputReady){P3.activeTime+=dt;updateBloomInput(dt);}else{P3.path=[];P3.lastSide=0;}
+    P3.vortex=Math.max(0,P3.vortex-dt*.24);
+    if(P3.beat===4){
+      P3.leader.x+=(900-P3.leader.x)*(1-Math.exp(-dt*.6));
+      P3.leader.y+=(560+bloomBounds().y*.62-P3.leader.y)*(1-Math.exp(-dt*.6));
+    }
+    var oldX=P3.camera.x,oldY=P3.camera.y;
+    var tx=900+(P3.leader.x-900)*.22,ty=560+(P3.leader.y-560)*.17;
+    P3.camera.x+=(tx-P3.camera.x)*(1-Math.exp(-dt*.8));
+    P3.camera.y+=(ty-P3.camera.y)*(1-Math.exp(-dt*.8));
+    P3.frameShift={x:(oldX-P3.camera.x)*p2Unit(),y:(oldY-P3.camera.y)*p2Unit()};
+    var b=bloomBounds();
+    if(P3.beat<4){
+      P3.dust.forEach(function(d){
+        d.x+=(d.vx+Math.sin(nowS+d.phase)*6)*dt;d.y+=d.vy*dt;
+        var dx=P3.leader.x-d.x,dy=P3.leader.y-d.y,dist=Math.hypot(dx,dy);
+        if(inputReady&&P3.vortex>.12&&dist<330){
+          d.x+=(dx*1.5-dy*(P3.turn||1))*P3.vortex*dt;
+          d.y+=(dy*1.5+dx*(P3.turn||1))*P3.vortex*dt;
+        }
+        if(d.y>560+b.y+20){var fresh=seedBloomDust(true);Object.assign(d,fresh);}
+        if(inputReady){
+          for(var i=0;i<spirits.length;i++)if(Math.hypot(spirits[i].wx-d.x,spirits[i].wy-d.y)<18){
+            spirits[i].flash=.65;P3.collected++;P3.dustCredit++;
+            bloomRing(d.x,d.y,[255,243,214]);Object.assign(d,seedBloomDust(true));
+            if(P3.beat===1&&P3.dustCredit>=3&&spirits.length<Math.min(P3.target-12,P3.startCount+12)){
+              P3.dustCredit=0;bloomBirth(spirits[i]);
+            }
+            break;
+          }
+        }
+      });
+    }else{
+      P3.dust.forEach(function(d){d.y+=22*dt;});P3.completion=Math.min(1,P3.completion+dt/4);
+    }
+    spirits.forEach(function(s){updateBloomSpirit(s,dt,nowS);});
+    var centers=[{x:0,y:0,n:0},{x:0,y:0,n:0}];
+    spirits.forEach(function(s){var c=centers[s.group];c.x+=s.wx;c.y+=s.wy;c.n++;});
+    centers.forEach(function(c){if(c.n){c.x/=c.n;c.y/=c.n;}});
+    var separation=Math.hypot(centers[0].x-centers[1].x,centers[0].y-centers[1].y);
+    if(P3.beat===2&&P3.split>.6&&separation>Math.min(150,b.x*.5))P3.separated=true;
+    if(inputReady&&P3.beat===1){
+      // 持续张手的自然采集作为画圈困难时的软进度；无手时不推进。
+      if(g==='Gather'){P3.grow+=dt;if(P3.grow>4){P3.grow=0;P3.collected++;}}
+      if(P3.collected>=12)setBloomBeat(2);
+    }
+    if(inputReady&&P3.beat===2&&P3.merging&&P3.split<.12&&separation<110){
+      P3.merging=false;P3.separated=false;P3.mixed++;P3.pulse=1;
+      P3.mixedColor=bloomAddColor(P3_PALETTE[0],P3_PALETTE[2]);
+      bloomRing(900,560,P3.mixedColor);
+      spirits.forEach(function(s){s.flash=.7;s.bloomColor=P3.mixedColor.slice();});
+      P3.mixPause=1.8;
+    }
+    if(P3.mixPause>0){P3.mixPause-=dt;if(P3.mixPause<=0)setBloomBeat(3);}
+    if(P3.beat===3){
+      var beatIndex=Math.floor(P3.beatClock/.8);
+      if(beatIndex!==P3.beatIndex){P3.beatIndex=beatIndex;P3.pulse=1;bloomRing(P3.leader.x,P3.leader.y,P3_PALETTE[1]);bloomTone();}
+      if(inputReady && (g==='Gather'||g==='Disperse') && g!==P3.gesture && P3.clock-P3.gestureAt>.22){
+        var phase=(P3.beatClock%.8)/.8, synced=Math.min(phase,1-phase)<.26;
+        if(synced)P3.rhythmHits++;
+        P3.grow+=synced?2:1;P3.gestureAt=P3.clock;P3.pulse=1;
+      }
+      if(inputReady){
+        P3.grow+=dt*.65; // 跟不上节拍也能在手掌在场时缓慢增殖。
+        if(P3.grow>=1&&spirits.length<P3.target){P3.grow--;bloomBirth(spirits[Math.floor(rand(0,spirits.length))]);}
+      }
+      if(spirits.length>=P3.target){P3.complete=true;setBloomBeat(4);P3.pulse=1;}
+    }
+    P3.gesture=g;P3.pulse=Math.max(0,P3.pulse-dt*1.8);
+    P3.rings.forEach(function(r){r.age+=dt;});P3.rings=P3.rings.filter(function(r){return r.age<1.4;}).slice(-24);
+    var cue=!active?'请将手掌放回画面，微光会等你回来':
+      P3.beat===1?(P3.vortex>.2?'漩涡正在卷入光尘，光群逐渐生长':'缓缓画圈卷起光尘，或张开手掌等待光灵采集'):
+      P3.beat===2?(P3.splitReady?'把手移回中央，让两群微光相遇':P3.merging?'青蓝与金色正在交汇…':'单手快速移向左右两侧分群，再回中合拢；也可双手分开'):
+      P3.beat===3?'跟着光圈的节奏张手、握拳；慢一些也能继续生长':'光尘渐息，让新生的微光汇向深处';
+    herdCue.textContent=cue;
+    herdProgress.textContent=P3.beat===1?'光尘 '+Math.min(12,P3.collected)+' / 12':
+      P3.beat===2?'青蓝 × 金 → 青绿':P3.beat===3?'光灵 '+spirits.length+' / '+P3.target:'光灵 '+spirits.length+' · 繁衍完成';
+    herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
+  }
+  function drawBloomEnvironment() {
+    if(scene!==SCENE.BLOOM)return;
+    var t=easeInOutCubic(bloomMix), u=p2Unit(), side=Math.max(W/1536,H/1024);
+    var keys=['base','far','basin','front'],depth=[0,.16,.5,.95],alpha=[1,.32,.85,.82];
+    keys.forEach(function(key,i){
+      var d=depth[i], margin=d?.02+d*.09:0;
+      var w=1536*side*(1+margin),h=1024*side*(1+margin);
+      var dx=-(P3.camera.x-900)*u*d,dy=-(P3.camera.y-560)*u*d;
+      ctx.save();ctx.globalAlpha=alpha[i];if(i===1)ctx.filter='brightness(1.08)';
+      ctx.drawImage(P3Art.images[key],W/2-w/2+dx,H/2-h/2+dy,w,h);ctx.restore();
+    });
+    if(bloomBackdrop){ctx.save();ctx.globalAlpha=1-t;ctx.drawImage(bloomBackdrop,0,0,W,H);ctx.restore();}
+  }
+  function drawBloomEffects(nowS) {
+    if(scene!==SCENE.BLOOM || !bloomP5)return;
+    var scale=Math.min(1,1100/Math.max(W,H)),fw=Math.max(1,Math.round(W*scale)),fh=Math.max(1,Math.round(H*scale));
+    if(!bloomFx || bloomFx.width!==fw || bloomFx.height!==fh){
+      if(bloomFx)bloomFx.remove();bloomFx=bloomP5.createGraphics(fw,fh);bloomFx.pixelDensity(1);
+    }
+    var p=bloomFx;p.clear();p.push();p.scale(scale);p.blendMode(bloomP5.ADD);p.noStroke();
+    var fade=easeInOutCubic(bloomMix),dustFade=fade*(P3.beat===4?1-P3.completion:1),u=p2Unit();
+    P3.dust.forEach(function(d){
+      var s=bloomScreen(d.x,d.y),r=d.size*Math.max(.6,u),a=(.55+.45*Math.sin(nowS*1.3+d.phase))*dustFade;
+      p.fill(255,243,214,16*a);p.circle(s.x,s.y,r*7);
+      p.fill(255,243,214,185*a);p.circle(s.x,s.y,r*1.5);
+    });
+    var center=bloomScreen(P3.leader.x,P3.leader.y);
+    if(P3.vortex>.02){
+      p.noFill();p.strokeWeight(Math.max(.6,u));
+      for(var k=0;k<5;k++){
+        p.stroke(120,201,242,45*P3.vortex*fade);p.beginShape();
+        for(var j=0;j<=36;j++){
+          var angle=j/36*Math.PI*2+nowS*(P3.turn||1)*.6+k*1.256;
+          var r=(25+j*3.6)*u;var wobble=(bloomP5.noise(j*.1,k,nowS*.1)-.5)*9*u;
+          p.vertex(center.x+Math.cos(angle)*(r+wobble),center.y+Math.sin(angle)*r*.75);
+        }p.endShape();
+      }
+    }
+    p.noFill();
+    P3.rings.forEach(function(r){var s=bloomScreen(r.x,r.y),a=(1-r.age/1.4)*fade;
+      p.stroke(r.color[0],r.color[1],r.color[2],65*a);p.strokeWeight(Math.max(.6,u));
+      p.ellipse(s.x,s.y,(20+r.age*150)*u,(20+r.age*150)*u*.78);
+    });
+    p.pop();ctx.save();ctx.globalCompositeOperation='lighter';ctx.drawImage(p.canvas,0,0,W,H);ctx.restore();
   }
 
 
@@ -1443,14 +1839,28 @@
     } catch (e) { return; }
 
     if (res.landmarks && res.landmarks.length > 0) {
-      if (res.gestures && res.gestures[0] && res.gestures[0][0]) {
+      var primary=0;
+      if(scene===SCENE.BLOOM && res.landmarks.length>1 && hand.cursor.seen){
+        var distances=res.landmarks.map(function(lm){
+          var x=0,y=0;[0,5,9,13,17].forEach(function(i){x+=lm[i].x;y+=lm[i].y;});
+          return Math.hypot((1-x/5)*W-hand.cursor.x,y/5*H-hand.cursor.y);
+        });
+        if(distances[1]<distances[0])primary=1;
+      }
+      if (res.gestures && res.gestures[primary] && res.gestures[primary][0]) {
         // 类别稳定滤波：连续 2 次一致才采纳，防止单帧跳变（方案 4.2 防抖）
-        var cat = res.gestures[0][0].categoryName;         // Gather / Disperse / …
+        var cat = res.gestures[primary][0].categoryName;         // Gather / Disperse / …
         if (cat === hand.catPending) hand.catCount++;
         else { hand.catPending = cat; hand.catCount = 1; }
         if (hand.catCount >= 2) hand.category = cat;
       }
-      processLandmarks(res.landmarks[0], nowMs / 1000);
+      processLandmarks(res.landmarks[primary], nowMs / 1000);
+      hand.secondary=null;
+      if(scene===SCENE.BLOOM && res.landmarks[1]){
+        var second=res.landmarks[1-primary],sx=0,sy=0;
+        [0,5,9,13,17].forEach(function(i){sx+=second[i].x;sy+=second[i].y;});
+        hand.secondary={x:(1-sx/5)*W,y:sy/5*H,at:nowMs/1000};
+      }
     }
     // （手离开的清理由 tick 按真实时钟统一执行，真实/合成注入一致）
   }
@@ -1509,7 +1919,7 @@
   /* 光晕光标绘制：手 = 一团呼吸的光晕；捏合时收缩变暖，并显示保持进度弧。
      阶段一/二中不绘制——火种已直接成为掌心光晕（drawEmberLayer 承担）。 */
   function drawHandCursor(nowS) {
-    if (scene === SCENE.AWAKEN || scene === SCENE.HERD) return;
+    if (scene === SCENE.AWAKEN || scene === SCENE.HERD || scene === SCENE.BLOOM) return;
     var c = hand.cursor;
     if (c.alpha < 0.02) return;
     var pinching = hand.pinch.active;
@@ -1555,6 +1965,7 @@
 
   function startDive() {
     if (scene !== SCENE.TITLE) return;
+    prepareBloomAudio();
     scene = SCENE.DIVING;
     sceneClock = 0;
     screenEl.classList.add("leaving");           // 标题组上飘淡出（CSS 动画）
@@ -1616,7 +2027,9 @@
     hand.debugCategory = null;
     pendingIgnite = false;
     // 阶段二状态复位，保留已解码纹理以便再次游玩。
-    resetPhase2();
+    resetPhase2();resetPhase3();hand.secondary=null;
+    document.getElementById("journey-status").hidden=true;
+    if(hand.recognizer)Promise.resolve(hand.recognizer.setOptions({numHands:1})).catch(function(){});
     // 沉睡光点补满（节拍 2 唤醒会消耗粒子）
     particles.length = 0;
     resize();
@@ -1671,6 +2084,7 @@
     }
     else if (scene === SCENE.AWAKEN) updatePhase1(dt, nowS);
     else if (scene === SCENE.HERD) updatePhase2(dt, nowS);
+    else if (scene === SCENE.BLOOM) updatePhase3(dt, nowS);
 
     updateEmberLife(dt);   // 火种生命周期：缩小成灯芯 / 掌晕跟手与归中
 
@@ -1678,7 +2092,7 @@
        （黑底 + 低透明黑覆盖衰减成光带 + 随流速横向偏移），最后 'lighter' 合成。
        背景粒子与环境不再参与拖尾累积 —— 消除雨丝残痕与灰雾。 */
     if (trailMode) {
-      var shift = scene === SCENE.HERD ? P2.frameShift : { x: 0, y: 0 };
+      var shift = scene === SCENE.BLOOM ? P3.frameShift : scene === SCENE.HERD ? P2.frameShift : { x: 0, y: 0 };
       if (Math.abs(shift.x) + Math.abs(shift.y) > .01) {
         tctx.drawImage(trailCv, 0, 0, trailCv.width, trailCv.height, shift.x, shift.y, W, H);
       }
@@ -1704,6 +2118,7 @@
 
     // 远景礁石海沟剪影（最底层视差，方案 5.5）
     drawFarReefs();
+    drawBloomEnvironment();
 
     // 粒子层（沉睡光点 = 中景尘埃；阶段一中被逐个唤醒转化为光灵；
     // 阶段二随世界流速视差滚动，提供空间纵深参照）
@@ -1741,6 +2156,8 @@
     drawShadow();  // 黑影在岩壁后、水道内掠过。
     drawReefs(nowS);
     drawP2Layer(3);  // 少量前景也在环境层，避免遮盖原光灵亮芯与拖尾。
+
+    drawBloomEffects(nowS);
 
     // ===== 发光体层：切换到拖尾离屏层绘制（加色发光累积成光带） =====
     ctx = tctx;
@@ -1869,6 +2286,15 @@
 
   /* 【临时调试】自动化测试用：注入合成关键点 / 查询内部状态。
      与真实识别共用 processLandmarks 处理管线，交付前可整体删除。 */
+  document.getElementById("journey-retry").addEventListener("click",function(){
+    prepareBloomAudio();bloomRuntimeError=null;initPhase3Art();
+    document.getElementById("journey-status").hidden=true;
+  });
+  document.getElementById("bloom-sound").addEventListener("click",function(){
+    bloomAudioEnabled=!bloomAudioEnabled;if(bloomAudioEnabled)prepareBloomAudio();
+    this.textContent=bloomAudioEnabled?"节拍声音：开":"节拍声音：关";
+    this.setAttribute("aria-pressed",String(bloomAudioEnabled));
+  });
   window.__abyss = {
     hand: hand,
     scene: function () { return scene; },
@@ -1895,6 +2321,17 @@
     setCategory: function (c) { hand.debugCategory = c; },
     lock: function (v) { hand.debugLock = !!v; },
     setTimeScale: function (k) { TIME_SCALE = clamp(k, 0, 12); },
+    p3: function(){return {beat:P3.beat,collected:P3.collected,mixed:P3.mixed,split:P3.split,
+      vortex:P3.vortex,rhythmHits:P3.rhythmHits,complete:P3.complete,target:P3.target,
+      count:spirits.length,clock:P3.clock,blend:bloomMix,assetsReady:P3Art.ready,
+      p5Ready:!!bloomP5,p5Drawn:!!bloomFx,leader:{x:P3.leader.x,y:P3.leader.y},
+      camera:{x:P3.camera.x,y:P3.camera.y},colors:spirits.map(function(s){return s.bloomColor;}),
+      dustCount:P3.dust.length};},
+    bloomBodies: function(){return spirits.map(function(s){return {x:s.wx,y:s.wy};});},
+    previewPhase3: function(){
+      this.previewPhase2("wide");P2.progress=1;P2.travel=5100;P2.leader.x=5100;
+      P2.leader.y=p2RouteAt(4800).y;setHerdBeat(4);initPhase3Art();
+    },
     // 开发预览：不申请摄像头、不改变正式开场路径。
     previewPhase2: function (route) {
       resetAll(); screenEl.style.display = "none";
@@ -1917,7 +2354,7 @@
   "front": "assets/images/p2_overhang.webp"
 };
 
-  resetPhase2();
+  resetPhase2();resetPhase3();
   resize();
   requestAnimationFrame(function (now) {
     last = now;

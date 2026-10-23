@@ -11,6 +11,12 @@
   <!-- 深海粒子背景画布 -->
   <canvas id="sea"></canvas>
 
+  <aside class="journey-status" id="journey-status" hidden role="status">
+    <p>海盆素材尚未加载完成，光群会在出口等候。</p>
+    <button id="journey-retry" type="button">重试加载</button>
+  </aside>
+  <button class="bloom-sound" id="bloom-sound" type="button" hidden aria-pressed="true">节拍声音：开</button>
+
   <!-- 开屏内容 -->
   <main class="screen">
     <h1 class="title">
@@ -47,6 +53,7 @@
     <p class="herd-cue" id="herd-cue" aria-live="polite"></p>
   </section>
 
+  <!-- p5.js 在阶段二后半程由 sketch.js 按需加载；阶段三实际用于光尘与力场绘制。 -->
   <script src="sketch.js"></script>
 </body>
 </html>
