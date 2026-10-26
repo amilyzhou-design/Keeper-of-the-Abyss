@@ -1315,7 +1315,7 @@
 
 
   /* ============================================
-     阶段三 · 繁衍：光尘雪 → 双群混色 → 节拍增殖。
+     阶段三 · 繁衍 v5：两核培育 → 双群炼色 → 三枚共振种子。
      p5 实例负责光尘、漩涡流线、脉冲涟漪；既有 Canvas 保留光灵视觉。
      只有主 tick 推进模拟，p5.noLoop 避免双重动画时钟。
      ============================================ */
@@ -1332,15 +1332,19 @@
     basin: 'assets/images/p3_basin.webp', front: 'assets/images/p3_foreground.webp' };
 
   function resetPhase3() {
-    P3 = { beat: 0, clock: 0, beatClock: 0, activeTime: 0, collected: 0, mixed: 0,
-      dust: [], rings: [], leader: {x:900,y:560}, camera:{x:900,y:560},
-      prevCamera:{x:900,y:560}, frameShift:{x:0,y:0}, vortex:0, turn:0, path:[],
-      split:0, splitReady:false, splitHold:0, mergeHold:0, lastSide:0, sideAt:-10,
-      splitAt:0, pulse:0, beatIndex:-1, rhythmHits:0, gesture:'Neutral', gestureAt:0,
-      grow:0, dustCredit:0, preview:false, target:60, complete:false, completion:0 };
-    bloomMix = 0; bloomBackdrop = null;
-    var sound = document.getElementById('bloom-sound');
-    if (sound) sound.hidden = true;
+    P3={beat:0,clock:0,beatClock:0,activeTime:0,collected:0,mixed:0,dust:[],rings:[],
+      leader:{x:900,y:560},camera:{x:900,y:560},frameShift:{x:0,y:0},
+      vortex:0,vortexRadius:150,turn:0,path:[],inputLast:null,inputSpeed:0,returnPeak:0,
+      split:0,splitReady:false,mergeHold:0,lastSide:0,sideAt:-10,splitAt:0,separated:false,
+      merging:false,mergeStyle:'gentle',fusion:null,prevSpacing:null,wasCentered:false,
+      pulse:0,beatIndex:-1,rhythmHits:0,rhythm:null,grow:0,target:60,startCount:0,
+      complete:false,completion:0,budget:[0,0,0],births:[],birthTimer:0,activeNest:-1,
+      nurseries:[{x:680,y:535,color:P3_PALETTE[0].slice()},{x:1120,y:605,color:P3_PALETTE[2].slice()}],
+      seeds:[{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0}]};
+    P3.nurseries.forEach(function(n){Object.assign(n,{dust:0,energy:0,state:'sleeping',pulse:0,
+      hatchAge:0,cooldown:0,nearTime:0,openHold:0,assist:false});});
+    bloomMix=0;bloomBackdrop=null;
+    var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
   }
 
   function prepareBloomAudio() {
@@ -1352,15 +1356,27 @@
       if (bloomAudio && bloomAudio.state === 'suspended') bloomAudio.resume().catch(function(){});
     } catch (_) { bloomAudio = null; }
   }
-  function bloomTone() {
-    if (!bloomAudioEnabled || !bloomAudio || bloomAudio.state !== 'running') return;
-    var osc = bloomAudio.createOscillator(), gain = bloomAudio.createGain(), t = bloomAudio.currentTime;
-    osc.type = 'sine'; osc.frequency.value = [261.63,329.63,392,523.25][P3.beatIndex % 4];
-    gain.gain.setValueAtTime(0,t); gain.gain.linearRampToValueAtTime(.026,t+.012);
-    gain.gain.exponentialRampToValueAtTime(.0001,t+.4);
-    osc.connect(gain); gain.connect(bloomAudio.destination); osc.start(t); osc.stop(t+.42);
-    osc.onended = function(){osc.disconnect();gain.disconnect();};
+  function bloomSound(kind,index) {
+    if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
+    var time=bloomAudio.currentTime;
+    if(kind==='dust'){
+      if(time-(P3.lastDustSound||-1)<.1)return;P3.lastDustSound=time;
+    }
+    var pitches=kind==='dust'?[[523.25,587.33,659.25,783.99,880][index%5]]:
+      kind==='pulse'?[index%2===0?392:261.63]:kind==='hatch'?[261.63,329.63,392]:
+      kind==='seed'?[392,523.25,659.25]:[261.63,329.63,392];
+    pitches.forEach(function(hz,i){
+      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain();
+      var at=time+(kind==='fusion'?0:i*.065),duration=kind==='dust'?.18:kind==='fusion'?.8:.42;
+      osc.type='sine';osc.frequency.value=hz;
+      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(kind==='dust'?.012:.018/pitches.length,at+.015);
+      gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
+      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+duration+.03);
+      osc.onended=function(){osc.disconnect();gain.disconnect();};
+    });
   }
+  function bloomTone(){bloomSound('pulse',P3.beatIndex);}
+
   function loadBloomRuntime() {
     if (bloomRuntime) return bloomRuntime;
     bloomRuntimeError = null;
@@ -1418,21 +1434,28 @@
   function bloomBounds() {
     return {x:Math.min(670,W/p2Unit()*.42),y:Math.min(390,H/p2Unit()*.34)};
   }
-  function seedBloomDust(topOnly) {
-    var b=bloomBounds();
-    return {x:900+rand(-b.x,b.x),y:topOnly?560-b.y-25:560+rand(-b.y,b.y),
-      vx:rand(-8,8),vy:rand(13,26),phase:rand(0,Math.PI*2),size:rand(.8,2.1)};
+  function seedBloomDust(topOnly,edible) {
+    var b=bloomBounds();if(edible==null)edible=Math.random()<.55;
+    var eligible=P3.nurseries.filter(function(n){return n.state!=='hatched'&&n.state!=='contract';});
+    var n=eligible.length?eligible[Math.floor(Math.random()*eligible.length)]:null;
+    var x=900+rand(-b.x,b.x),y=topOnly?560-b.y-25:560+rand(-b.y,b.y);
+    if(edible&&n){x=n.x+rand(-105,105);y=n.y-rand(90,200);}
+    return {x:x,y:y,vx:rand(-5,5),vy:rand(12,22),phase:rand(0,Math.PI*2),size:rand(.8,2),edible:edible};
   }
+
   function enterBloom() {
     if (scene===SCENE.BLOOM || !P3Art.ready || !bloomP5) return;
     var u=p2Unit(), ep=emberPos();
-    // 捕获仍含旧光群的最后一帧；新光群仍在同一屏幕坐标，淡出时不会闪断。
+    // 单独捕获旧环境；原有光群持续游动，交融时不会复制旧光灵。
     var old=document.createElement('canvas');old.width=canvas.width;old.height=canvas.height;
     var previousContext=ctx;ctx=old.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
     ctx.fillStyle='#06121f';ctx.fillRect(0,0,W,H);drawFarReefs();drawReefs(performance.now()/1000);drawP2Layer(3);ctx=previousContext;
     resetPhase3();bloomBackdrop=old;
     P3.leader={x:900+(ep.x-W/2)/u,y:560+(ep.y-H*.47)/u};
     P3.startCount=spirits.length;P3.target=Math.max(60,spirits.length*2);morphT=1;
+    var growth=P3.target-P3.startCount;
+    P3.budget[0]=Math.round(growth*.35);P3.budget[1]=Math.round(growth*.30);
+    P3.budget[2]=growth-P3.budget[0]-P3.budget[1];
     spirits.forEach(function(s,i){
       s.wx=900+(s.x-W/2)/u;s.wy=560+(s.y-H*.47)/u;
       s.wvx=s.vx/u;s.wvy=s.vy/u;s.group=i%2;s.bloomColor=COLOR_P2.spirit.slice();
@@ -1451,70 +1474,117 @@
     document.getElementById('journey-status').hidden=true;
   }
   function setBloomBeat(beat) {
-    P3.beat=beat;P3.beatClock=0;P3.grow=0;
+    P3.beat=beat;P3.beatClock=0;P3.grow=0;P3.path=[];P3.vortex=0;
     herdHud.hidden=false;herdHud.dataset.phase='3';herdHud.dataset.beat=String(beat);
     herdHud.classList.remove('quiet');
     document.querySelector('.herd-chapter').textContent='03 / BLOOM';
-    herdTitle.textContent=['','光尘雪','颜色炼金','节拍脉冲','繁光初成'][beat];
+    herdTitle.textContent=['','引流育光','颜色炼金','群体共振','繁光初成'][beat];
+    if(beat===2){P3.lastSide=0;P3.sideAt=-10;P3.returnPeak=0;}
+    if(beat===3){
+      P3.rhythm={time:0,index:-1,phrase:0,responses:{},failed:0,assist:false,assistEdges:0,
+        assistMask:0,confirmed:null,candidate:null,stable:0,lastEdge:-10,intro:2.4,cooldown:0};
+      P3.gesture='Neutral';
+    }
   }
-  function bloomBirth(parent) {
-    if(spirits.length>=P3.target || spirits.length>=120)return;
-    var s=makeSpirit(parent.x,parent.y,{size:rand(.7,1.3),bright:rand(.8,1.2)});
-    s.wx=parent.wx+rand(-14,14);s.wy=parent.wy+rand(-14,14);
-    s.wvx=parent.wvx+rand(-30,30);s.wvy=parent.wvy+rand(-30,30);
-    s.group=spirits.length%2;s.colorIndex=spirits.length%4;s.sizeGoal=s.size;
-    s.bloomColor=(parent.bloomColor||COLOR_P2.spirit).slice();
-    spirits.push(s);
+  function bloomBirth(parent, group, color) {
+    if(spirits.length>=P3.target)return false;
+    var s=makeSpirit(parent.x||0,parent.y||0,{size:rand(.7,1.3),bright:rand(.8,1.2)});
+    s.wx=parent.wx+rand(-16,16);s.wy=parent.wy+rand(-16,16);
+    s.birthX=s.wx;s.birthY=s.wy;s.wvx=rand(-35,35);s.wvy=rand(-35,35);
+    s.group=group;s.colorIndex=spirits.length%4;s.sizeGoal=s.size;
+    s.natalColor=color.slice();s.bloomColor=color.slice();s.bloomBornAt=P3.clock;
+    projectBloomSpirit(s);spirits.push(s);return true;
   }
-  function bloomRing(x,y,color) {P3.rings.push({x:x,y:y,age:0,color:color||[191,217,232]});}
+  function queueBloomBirth(count,x,y,group,color,source) {
+    if(count>0)P3.births.push({remaining:count,x:x,y:y,group:group,color:color.slice(),source:source});
+  }
+  function updateBloomBirths(dt,active) {
+    if(!active || !P3.births.length)return;
+    P3.birthTimer-=dt;
+    while(P3.birthTimer<=0 && P3.births.length){
+      var job=P3.births[0];
+      bloomBirth({wx:job.x,wy:job.y},job.group==null?spirits.length%2:job.group,job.color);
+      job.remaining--;P3.birthTimer+=.16;
+      if(job.remaining<=0 || spirits.length>=P3.target)P3.births.shift();
+    }
+  }
+  function bloomRing(x,y,color,style) {
+    P3.rings.push({x:x,y:y,age:0,color:color||[191,217,232],style:style||'soft'});
+  }
+  function bloomSeedPosition(index) {
+    var a=-Math.PI/2+index*Math.PI*2/3;
+    return {x:P3.leader.x+Math.cos(a)*120,y:P3.leader.y+Math.sin(a)*95};
+  }
+  function bloomCentroids() {
+    var c=[{x:0,y:0,n:0,vx:0,vy:0},{x:0,y:0,n:0,vx:0,vy:0}];
+    spirits.forEach(function(s){var t=c[s.group];t.x+=s.wx;t.y+=s.wy;t.vx+=s.wvx;t.vy+=s.wvy;t.n++;});
+    c.forEach(function(t){if(t.n){t.x/=t.n;t.y/=t.n;t.vx/=t.n;t.vy/=t.n;}});return c;
+  }
   function updateBloomInput(dt) {
-    var active=hand.present, b=bloomBounds();
-    if(P3.beat===4)return;
-    if(!active){P3.path=[];P3.lastSide=0;P3.splitHold=0;P3.mergeHold=0;return;}
-    var wx=P3.camera.x+(hand.cursor.x-W/2)/p2Unit();
+    if(P3.beat===4 || dt<=0)return;
+    var b=bloomBounds(),wx=P3.camera.x+(hand.cursor.x-W/2)/p2Unit();
     var wy=P3.camera.y+(hand.cursor.y-H*.47)/p2Unit();
     wx=clamp(wx,900-b.x,900+b.x);wy=clamp(wy,560-b.y,560+b.y*.8);
+    var previous=P3.inputLast;
+    if(previous){
+      var speed=clamp(Math.hypot(wx-previous.x,wy-previous.y)/dt,0,1000);
+      P3.inputSpeed+=(speed-P3.inputSpeed)*(1-Math.exp(-dt*8));
+      P3.returnPeak*=Math.exp(-dt*1.2);
+      if(Math.abs(wx-900)<Math.abs(previous.x-900)-1)P3.returnPeak=Math.max(P3.returnPeak,P3.inputSpeed);
+    }
+    P3.inputLast={x:wx,y:wy};
     P3.leader.x+=(wx-P3.leader.x)*(1-Math.exp(-dt*4));
     P3.leader.y+=(wy-P3.leader.y)*(1-Math.exp(-dt*4));
-    // 掌心轨迹的连续转角，配合最小行程，避免手抖触发漩涡。
-    var path=P3.path, prev=path[path.length-1];
-    if(!prev || Math.hypot(wx-prev.x,wy-prev.y)>9){
+    var path=P3.path,prev=path[path.length-1];
+    if(!prev || Math.hypot(wx-prev.x,wy-prev.y)>8){
       path.push({x:wx,y:wy,t:P3.clock});
-      while(path.length>30 || (path.length && P3.clock-path[0].t>2.2))path.shift();
-      var turn=0,length=0;
+      while(path.length>40 || (path.length && P3.clock-path[0].t>2.4))path.shift();
+      var turn=0,length=0,minX=wx,maxX=wx,minY=wy,maxY=wy;
+      path.forEach(function(p){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minY=Math.min(minY,p.y);maxY=Math.max(maxY,p.y);});
       for(var i=2;i<path.length;i++){
         var a=path[i-2],c=path[i-1],d=path[i];
-        var dx=c.x-a.x,dy=c.y-a.y,ex=d.x-c.x,ey=d.y-c.y;
-        turn+=normAngle(Math.atan2(ey,ex)-Math.atan2(dy,dx));length+=Math.hypot(ex,ey);
+        turn+=normAngle(Math.atan2(d.y-c.y,d.x-c.x)-Math.atan2(c.y-a.y,c.x-a.x));
+        length+=Math.hypot(d.x-c.x,d.y-c.y);
       }
-      if(Math.abs(turn)>2.1 && length>110){P3.vortex=Math.min(1,P3.vortex+dt*5+.12);P3.turn=Math.sign(turn);}
+      if(Math.abs(turn)>2.1 && length>100){
+        P3.vortex=Math.min(1,P3.vortex+dt*5+.1);P3.turn=Math.sign(turn);
+        P3.vortexRadius+=(clamp(Math.max(maxX-minX,maxY-minY)*1.05,90,240)-P3.vortexRadius)*Math.min(1,dt*3);
+      }
     }
-    if(P3.beat!==2)return;
-    if(P3.merging){P3.split=Math.max(0,P3.split-dt*.72);return;}
-    var nx=(hand.cursor.x/W-.5), side=Math.abs(nx)>.18?Math.sign(nx):0;
+    if(P3.beat!==2 || P3.fusion)return;
+    if(P3.merging){P3.split=Math.max(0,P3.split-dt*(P3.mergeStyle==='surge'?1.2:.45));return;}
+    var nx=hand.cursor.x/W-.5,side=Math.abs(nx)>.18?Math.sign(nx):0;
     var second=hand.secondary && performance.now()/1000-hand.secondary.at<.3?hand.secondary:null;
-    var twoApart=second && Math.abs(second.x-hand.cursor.x)>W*.3;
-    if(twoApart || (side && P3.lastSide && side!==P3.lastSide && P3.clock-P3.sideAt<2.2)){
-      if(!P3.splitReady){P3.splitAt=P3.clock;P3.separated=false;}
-      P3.splitReady=true;P3.splitHold=1;
+    var spacing=second?Math.abs(second.x-hand.cursor.x)/W:0;
+    if(second && P3.prevSpacing!=null && spacing<P3.prevSpacing){
+      P3.returnPeak=Math.max(P3.returnPeak,clamp((P3.prevSpacing-spacing)*W/p2Unit()/dt*.5,0,900));
+    }
+    P3.prevSpacing=second?spacing:null;
+    var twoApart=second && spacing>.30;
+    if(twoApart || (side && P3.lastSide && side!==P3.lastSide && P3.clock-P3.sideAt<2.8)){
+      if(!P3.splitReady){P3.splitAt=P3.clock;P3.separated=false;P3.returnPeak=0;P3.arrivalStyle=null;}
+      P3.splitReady=true;
     }
     if(side && side!==P3.lastSide){P3.lastSide=side;P3.sideAt=P3.clock;}
-    var centered=Math.abs(nx)<.13;
-    var twoTogether=second && Math.abs(second.x-hand.cursor.x)<W*.2;
+    var together=(!second && Math.abs(nx)<.13) || (second && spacing<.2);
     if(P3.splitReady){
       P3.split+=(1-P3.split)*(1-Math.exp(-dt*2.8));
-      if((centered && !twoApart || twoTogether) && P3.separated && P3.clock-P3.splitAt>2.6)P3.mergeHold+=dt;
-      else P3.mergeHold=0;
-      if(P3.mergeHold>.55){P3.splitReady=false;P3.lastSide=0;P3.mergeHold=0;P3.merging=true;}
-    } else P3.split=Math.max(0,P3.split-dt*.72);
+      if(together && !P3.wasCentered)P3.arrivalStyle=P3.returnPeak>320?'surge':'gentle';
+      if(together && P3.separated && P3.clock-P3.splitAt>2.6)P3.mergeHold+=dt;else P3.mergeHold=0;
+      if(P3.mergeHold>.45){
+        P3.mergeStyle=P3.arrivalStyle||'gentle';P3.splitReady=false;P3.lastSide=0;P3.mergeHold=0;P3.merging=true;
+      }
+    }else P3.split=Math.max(0,P3.split-dt*.6);
+    P3.wasCentered=together;
   }
-  function updateBloomSpirit(s,dt,nowS) {
-    var b=bloomBounds(), pinched=hand.present&&hand.pinch.active;
-    var radius=pinched?32:(P3.beat===4?95:140);
-    var angle=s.orbitA+nowS*(.25+P3.vortex*.9)*(P3.turn||1);
-    var gx=P3.leader.x,gy=P3.leader.y;
+  function updateBloomSpirit(s,dt) {
+    var b=bloomBounds(),pinched=hand.present&&hand.pinch.active;
+    var radius=pinched?30:(P3.beat===4?100:125),gx=P3.leader.x,gy=P3.leader.y;
+    var angle=s.orbitA+P3.clock*((s.group?.21:.28)+P3.vortex*.65)*(P3.turn||1);
     if(P3.beat===2){
-      gx=900+(s.group?1:-1)*P3.split*b.x*.56;gy=560;
+      radius=pinched?30:95;
+      gx=900+(s.group?1:-1)*P3.split*Math.min(260,b.x*.6);gy=560+(s.group?25:-25)*P3.split;
+      angle=s.orbitA+P3.clock*.43*(s.group?1:-1);
       if(P3.splitReady && hand.secondary && performance.now()/1000-hand.secondary.at<.3){
         var palms=[hand.cursor,hand.secondary].sort(function(a,b){return a.x-b.x;});
         var palm=palms[s.group];
@@ -1522,116 +1592,227 @@
         gy=clamp(P3.camera.y+(palm.y-H*.47)/p2Unit(),560-b.y*.7,560+b.y*.65);
       }
     }
+    if(P3.beat===3){radius=pinched?30:140*(1+Math.sin((P3.rhythm.time/.8)*Math.PI)*.18);}
     if(P3.beat===4){gx=900;gy=560+b.y*.62;}
+    var age=P3.clock-(s.bloomBornAt==null?-100:s.bloomBornAt);
+    if(age<1.5){gx=lerp(s.birthX,gx,clamp(age/1.5,0,1));gy=lerp(s.birthY,gy,clamp(age/1.5,0,1));radius*=clamp(age/1.5,.25,1);}
     var tx=gx+Math.cos(angle+s.wanderPh)*radius*s.orbitR;
-    var ty=gy+Math.sin(angle*1.2+s.wanderPh)*radius*.7;
-    var ax=(tx-s.wx)*1.4,ay=(ty-s.wy)*1.4;
+    var ty=gy+Math.sin(angle*1.15+s.wanderPh)*radius*.7;
+    var ax=(tx-s.wx)*1.5,ay=(ty-s.wy)*1.5;
     for(var i=0;i<spirits.length;i++){
       var other=spirits[i];if(other===s)continue;
       var dx=s.wx-other.wx,dy=s.wy-other.wy,d2=dx*dx+dy*dy;
-      if(d2>1&&d2<38*38){ax+=dx/d2*240;ay+=dy/d2*240;}
+      if(d2>1&&d2<34*34){ax+=dx/d2*260;ay+=dy/d2*260;}
     }
-    if(P3.vortex>.08){
+    if(P3.beat===1 && P3.vortex>.08){
       var rx=s.wx-P3.leader.x,ry=s.wy-P3.leader.y;
       ax+=(-ry*.9*(P3.turn||1)-rx*.25)*P3.vortex;
       ay+=(rx*.9*(P3.turn||1)-ry*.25)*P3.vortex;
     }
     s.wvx=(s.wvx+ax*dt)*Math.exp(-dt*1.3);s.wvy=(s.wvy+ay*dt)*Math.exp(-dt*1.3);
-    var speed=Math.hypot(s.wvx,s.wvy),limit=230+P3.vortex*85;
+    var speed=Math.hypot(s.wvx,s.wvy),limit=P3.beat===2&&P3.merging&&P3.mergeStyle==='surge'?330:240;
     if(speed>limit){s.wvx*=limit/speed;s.wvy*=limit/speed;}
     s.wx=clamp(s.wx+s.wvx*dt,900-b.x,900+b.x);s.wy=clamp(s.wy+s.wvy*dt,560-b.y,560+b.y);
-    s.bornT+=dt;s.flash=Math.max(0,s.flash-dt*1.2);s.shadowDim=1;
-    s.size+=(s.sizeGoal-s.size)*Math.min(1,dt*.25);
-    var color=P3_PALETTE[s.colorIndex];
-    if(P3.beat===1)color=mixRgb(P3_PALETTE[0],color,clamp(P3.collected/22,0,1)*.7);
-    if(P3.beat===2)color=P3.split>.2?(s.group?P3_PALETTE[2]:P3_PALETTE[0]):(P3.mixed?P3.mixedColor:s.bloomColor);
-    s.bloomColor=mixRgb(s.bloomColor,color,Math.min(1,dt*.8));projectBloomSpirit(s);
+    s.bornT+=dt;s.flash=Math.max(0,s.flash-dt*1.3);s.shadowDim=1;
+    s.size+=(s.sizeGoal-s.size)*Math.min(1,dt*.35);
+    var breathTarget=(s.group?.95:1.5)+Math.sin(s.wanderPh)*.12;
+    s.breatheSpd+=(breathTarget-s.breatheSpd)*Math.min(1,dt*.5);
+    var groupColor=s.group?P3_PALETTE[2]:P3_PALETTE[0],color=groupColor;
+    if(P3.beat===1)color=mixRgb(P3_PALETTE[0],groupColor,clamp(P3.nurseries[s.group].dust/6,0,1));
+    if(P3.fusion){
+      var lag=Math.hypot(s.wx-P3.fusion.x,s.wy-P3.fusion.y)/280*.55;
+      var spread=clamp((P3.fusion.age-lag)/1.5,0,1);
+      color=mixRgb(groupColor,P3.mixedColor,spread);
+    }
+    if(P3.beat>=3){
+      var late=clamp(P3.seeds.filter(function(seed){return seed.mature;}).length/3,0,1);
+      color=mixRgb(P3.mixedColor,s.colorIndex===1?P3_PALETTE[1]:s.colorIndex===2?P3_PALETTE[2]:s.colorIndex===0?P3_PALETTE[0]:P3.mixedColor,late*.72);
+    }
+    s.bloomColor=mixRgb(s.bloomColor,color,Math.min(1,dt*1.5));
+    s.bright+=( (s.group?.92:1.03)-s.bright)*Math.min(1,dt*.08);
+    projectBloomSpirit(s);
   }
-  function updatePhase3(dt,nowS) {
-    P3.clock+=dt;P3.beatClock+=dt;
-    bloomMix=clamp(bloomMix+dt/5.5,0,1);
+  function updateBloomNurseries(dt,active,g) {
+    var nearest=-1,distance=Infinity;
+    P3.nurseries.forEach(function(n,i){
+      var d=Math.hypot(P3.leader.x-n.x,P3.leader.y-n.y);
+      if(n.state!=='hatched'&&d<distance){distance=d;nearest=i;}
+      n.pulse=Math.max(0,n.pulse-dt*1.8);n.cooldown=Math.max(0,n.cooldown-dt);
+      if(active&&d<165&&n.state!=='hatched'){
+        n.nearTime+=dt;
+        n.openHold=g==='Gather'?n.openHold+dt:0;
+        if(n.nearTime>5&&P3.vortex<.2)n.assist=true;
+      }else n.openHold=0;
+      if(active && n.state==='contract'){
+        n.hatchAge+=dt;
+        if(n.hatchAge>.9){
+          n.state='hatched';n.pulse=1;
+          var count=i===0?Math.ceil(P3.budget[0]/2):Math.floor(P3.budget[0]/2);
+          queueBloomBirth(count,n.x,n.y,i,n.color,'nursery');
+          bloomRing(n.x,n.y,n.color,'hatch');bloomSound('hatch',i);
+        }
+      }
+      if(n.state==='hatched')n.hatchAge=Math.min(3,n.hatchAge+dt);
+    });
+    P3.activeNest=nearest>=0&&distance<165?nearest:-1;
+  }
+  function updateBloomDust(dt,active,g) {
+    var b=bloomBounds(),n=P3.activeNest>=0?P3.nurseries[P3.activeNest]:null;
+    var flow=n&&active&&n.state!=='contract'&&n.state!=='hatched'?
+      Math.max(P3.vortex,n.assist&&n.openHold>.65?.4:0):0;
+    if(hand.pinch.active)flow*=.3;
+    P3.dust.forEach(function(d){
+      d.x+=(d.vx+Math.sin(P3.clock+d.phase)*5)*dt;d.y+=d.vy*dt;
+      d.flash=Math.max(0,(d.flash||0)-dt*3);
+      if(P3.beat===1 && d.edible && flow>.05){
+        var dx=n.x-d.x,dy=n.y-d.y,dist=Math.hypot(dx,dy);
+        if(dist<P3.vortexRadius+130){
+          d.x+=(dx*2.1-dy*.4*(P3.turn||1))*flow*dt;
+          d.y+=(dy*2.1+dx*.4*(P3.turn||1))*flow*dt;
+        }
+        if(Math.hypot(n.x-d.x,n.y-d.y)<28 && n.cooldown<=0 && n.dust<6){
+          n.dust++;n.energy=n.dust/2;n.state=n.dust===6?'contract':'charging';
+          n.pulse=.8;n.cooldown=.75;P3.collected++;bloomSound('dust',n.dust);
+          Object.assign(d,seedBloomDust(true,true));
+        }
+      }
+      if(d.y>560+b.y+35 || d.x<900-b.x-100 || d.x>900+b.x+100)Object.assign(d,seedBloomDust(true,d.edible));
+    });
+  }
+  function beginBloomFusion(centers) {
+    P3.mixed=1;P3.merging=false;P3.splitReady=false;
+    P3.mixedColor=bloomAddColor(P3_PALETTE[0],P3_PALETTE[2]);
+    P3.fusion={x:(centers[0].x+centers[1].x)/2,y:(centers[0].y+centers[1].y)/2,
+      style:P3.mergeStyle,age:0,queued:false};
+    P3.pulse=.8;bloomSound('fusion',0);
+    if(P3.mergeStyle==='surge'){
+      spirits.forEach(function(s){var a=Math.atan2(s.wy-P3.fusion.y,s.wx-P3.fusion.x);s.wvx+=Math.cos(a)*70;s.wvy+=Math.sin(a)*70;});
+    }
+  }
+  function matureBloomSeed() {
+    var seed=P3.seeds.find(function(s){return !s.mature;});if(!seed)return;
+    var index=P3.seeds.indexOf(seed),pos=bloomSeedPosition(index);
+    seed.mature=true;seed.age=0;seed.progress=1;P3.rhythm.cooldown=1.3;
+    var count=Math.floor(P3.budget[2]/3)+(index<P3.budget[2]%3?1:0);
+    queueBloomBirth(count,pos.x,pos.y,null,P3.mixedColor,'seed');
+    bloomRing(pos.x,pos.y,P3.mixedColor,'seed');bloomSound('seed',index);P3.pulse=1;
+  }
+  function updateBloomRhythm(dt,active,g) {
+    var r=P3.rhythm;if(!r)return;
+    P3.seeds.forEach(function(s){if(s.mature)s.age+=dt;});
+    if(!active){r.confirmed=null;r.candidate=null;r.stable=0;return;}
+    if(r.intro>0){r.intro=Math.max(0,r.intro-dt);r.confirmed=(g==='Gather'||g==='Disperse')?g:null;return;}
+    if(r.cooldown>0){r.cooldown=Math.max(0,r.cooldown-dt);r.confirmed=(g==='Gather'||g==='Disperse')?g:null;return;}
+    r.time+=dt;
+    var recognized=g==='Gather'||g==='Disperse';
+    if(recognized){
+      if(g===r.candidate)r.stable+=dt;else{r.candidate=g;r.stable=0;}
+      if(r.stable>=.1){
+        if(r.confirmed==null)r.confirmed=g;
+        else if(g!==r.confirmed && r.time-r.lastEdge>.28){
+          r.confirmed=g;r.lastEdge=r.time;
+          var nearest=Math.round(r.time/.8),phrase=Math.floor(nearest/4);
+          var response=r.responses[phrase]||(r.responses[phrase]={hits:0,mask:0,attempts:0,beats:{}});
+          response.attempts++;
+          var expected=nearest%2===0?'Gather':'Disperse';
+          var aligned=Math.abs(r.time-nearest*.8)<(r.assist?.37:.23)&&g===expected;
+          if(aligned&&!response.beats[nearest]){
+            response.beats[nearest]=true;response.hits++;response.mask|=g==='Gather'?1:2;P3.rhythmHits++;
+          }
+          if(r.assist){r.assistEdges++;r.assistMask|=g==='Gather'?1:2;}
+          var current=P3.seeds.find(function(s){return !s.mature;});
+          if(current){current.pulse=.8;current.progress=Math.max(current.progress,Math.min(.85,(r.assist?r.assistEdges/4:response.hits/2)*.85));}
+          P3.pulse=.55;
+        }
+      }
+    }else{r.candidate=null;r.stable=0;}
+    var index=Math.floor(r.time/.8);
+    if(index!==r.index){r.index=index;P3.beatIndex=index;P3.pulse=.7;bloomTone();}
+    var phraseIndex=Math.floor(r.time/3.2),matured=false;
+    while(r.phrase<phraseIndex){
+      var result=r.responses[r.phrase];
+      if(result&&result.hits>=2&&result.mask===3){matureBloomSeed();matured=true;r.assistEdges=0;r.assistMask=0;}
+      else if(result&&result.attempts>0){r.failed++;if(r.failed>=2)r.assist=true;}
+      delete r.responses[r.phrase-1];r.phrase++;
+    }
+    if(!matured&&r.assist&&r.assistEdges>=4&&r.assistMask===3){matureBloomSeed();r.assistEdges=0;r.assistMask=0;}
+  }
+  function updatePhase3(dt) {
+    P3.clock+=dt;P3.beatClock+=dt;bloomMix=clamp(bloomMix+dt/5.5,0,1);
     if(bloomMix===1)bloomBackdrop=null;
-    var active=hand.present, g=active?currentGesture():'Neutral';
-    var inputReady=active && bloomMix>.6;
-    if(inputReady){P3.activeTime+=dt;updateBloomInput(dt);}else{P3.path=[];P3.lastSide=0;}
-    P3.vortex=Math.max(0,P3.vortex-dt*.24);
+    var active=dt>0&&hand.present&&bloomMix>.85,g=active?currentGesture():'Neutral';
+    if(active){P3.activeTime+=dt;updateBloomInput(dt);}
+    else{P3.path=[];P3.lastSide=0;P3.inputLast=null;P3.inputSpeed=0;P3.returnPeak=0;P3.mergeHold=0;P3.wasCentered=false;}
+    P3.vortex=Math.max(0,P3.vortex-dt*.25);
     if(P3.beat===4){
       P3.leader.x+=(900-P3.leader.x)*(1-Math.exp(-dt*.6));
       P3.leader.y+=(560+bloomBounds().y*.62-P3.leader.y)*(1-Math.exp(-dt*.6));
+      P3.completion=Math.min(1,P3.completion+dt/5);
     }
-    var oldX=P3.camera.x,oldY=P3.camera.y;
-    var tx=900+(P3.leader.x-900)*.22,ty=560+(P3.leader.y-560)*.17;
-    P3.camera.x+=(tx-P3.camera.x)*(1-Math.exp(-dt*.8));
-    P3.camera.y+=(ty-P3.camera.y)*(1-Math.exp(-dt*.8));
+    var oldX=P3.camera.x,oldY=P3.camera.y,follow=easeInOutCubic(clamp((bloomMix-.65)/.35,0,1));
+    var tx=900+(P3.leader.x-900)*.22*follow,ty=560+(P3.leader.y-560)*.17*follow;
+    P3.camera.x+=(tx-P3.camera.x)*(1-Math.exp(-dt*.8));P3.camera.y+=(ty-P3.camera.y)*(1-Math.exp(-dt*.8));
     P3.frameShift={x:(oldX-P3.camera.x)*p2Unit(),y:(oldY-P3.camera.y)*p2Unit()};
-    var b=bloomBounds();
-    if(P3.beat<4){
-      P3.dust.forEach(function(d){
-        d.x+=(d.vx+Math.sin(nowS+d.phase)*6)*dt;d.y+=d.vy*dt;
-        var dx=P3.leader.x-d.x,dy=P3.leader.y-d.y,dist=Math.hypot(dx,dy);
-        if(inputReady&&P3.vortex>.12&&dist<330){
-          d.x+=(dx*1.5-dy*(P3.turn||1))*P3.vortex*dt;
-          d.y+=(dy*1.5+dx*(P3.turn||1))*P3.vortex*dt;
-        }
-        if(d.y>560+b.y+20){var fresh=seedBloomDust(true);Object.assign(d,fresh);}
-        if(inputReady){
-          for(var i=0;i<spirits.length;i++)if(Math.hypot(spirits[i].wx-d.x,spirits[i].wy-d.y)<18){
-            spirits[i].flash=.65;P3.collected++;P3.dustCredit++;
-            bloomRing(d.x,d.y,[255,243,214]);Object.assign(d,seedBloomDust(true));
-            if(P3.beat===1&&P3.dustCredit>=3&&spirits.length<Math.min(P3.target-12,P3.startCount+12)){
-              P3.dustCredit=0;bloomBirth(spirits[i]);
-            }
-            break;
-          }
-        }
-      });
-    }else{
-      P3.dust.forEach(function(d){d.y+=22*dt;});P3.completion=Math.min(1,P3.completion+dt/4);
-    }
-    spirits.forEach(function(s){updateBloomSpirit(s,dt,nowS);});
-    var centers=[{x:0,y:0,n:0},{x:0,y:0,n:0}];
-    spirits.forEach(function(s){var c=centers[s.group];c.x+=s.wx;c.y+=s.wy;c.n++;});
-    centers.forEach(function(c){if(c.n){c.x/=c.n;c.y/=c.n;}});
-    var separation=Math.hypot(centers[0].x-centers[1].x,centers[0].y-centers[1].y);
-    if(P3.beat===2&&P3.split>.6&&separation>Math.min(150,b.x*.5))P3.separated=true;
-    if(inputReady&&P3.beat===1){
-      // 持续张手的自然采集作为画圈困难时的软进度；无手时不推进。
-      if(g==='Gather'){P3.grow+=dt;if(P3.grow>4){P3.grow=0;P3.collected++;}}
-      if(P3.collected>=12)setBloomBeat(2);
-    }
-    if(inputReady&&P3.beat===2&&P3.merging&&P3.split<.12&&separation<110){
-      P3.merging=false;P3.separated=false;P3.mixed++;P3.pulse=1;
-      P3.mixedColor=bloomAddColor(P3_PALETTE[0],P3_PALETTE[2]);
-      bloomRing(900,560,P3.mixedColor);
-      spirits.forEach(function(s){s.flash=.7;s.bloomColor=P3.mixedColor.slice();});
-      P3.mixPause=1.8;
-    }
-    if(P3.mixPause>0){P3.mixPause-=dt;if(P3.mixPause<=0)setBloomBeat(3);}
-    if(P3.beat===3){
-      var beatIndex=Math.floor(P3.beatClock/.8);
-      if(beatIndex!==P3.beatIndex){P3.beatIndex=beatIndex;P3.pulse=1;bloomRing(P3.leader.x,P3.leader.y,P3_PALETTE[1]);bloomTone();}
-      if(inputReady && (g==='Gather'||g==='Disperse') && g!==P3.gesture && P3.clock-P3.gestureAt>.22){
-        var phase=(P3.beatClock%.8)/.8, synced=Math.min(phase,1-phase)<.26;
-        if(synced)P3.rhythmHits++;
-        P3.grow+=synced?2:1;P3.gestureAt=P3.clock;P3.pulse=1;
+    if(P3.beat===1)updateBloomNurseries(dt,active,g);
+    updateBloomDust(dt,P3.beat===1&&active,g);
+    spirits.forEach(function(s){updateBloomSpirit(s,dt);});
+    var centers=bloomCentroids(),separation=Math.hypot(centers[0].x-centers[1].x,centers[0].y-centers[1].y);
+    P3.separation=separation;P3.centers=centers;
+    if(P3.beat===2&&P3.split>.6&&separation>150)P3.separated=true;
+    if(active&&P3.beat===2&&P3.merging&&P3.split<.24&&separation<200){
+      var touch=false;
+      for(var i=0;i<spirits.length&&!touch;i++)for(var j=i+1;j<spirits.length;j++){
+        if(spirits[i].group!==spirits[j].group&&Math.hypot(spirits[i].wx-spirits[j].wx,spirits[i].wy-spirits[j].wy)<42){touch=true;break;}
       }
-      if(inputReady){
-        P3.grow+=dt*.65; // 跟不上节拍也能在手掌在场时缓慢增殖。
-        if(P3.grow>=1&&spirits.length<P3.target){P3.grow--;bloomBirth(spirits[Math.floor(rand(0,spirits.length))]);}
-      }
-      if(spirits.length>=P3.target){P3.complete=true;setBloomBeat(4);P3.pulse=1;}
+      if(touch)beginBloomFusion(centers);
     }
-    P3.gesture=g;P3.pulse=Math.max(0,P3.pulse-dt*1.8);
-    P3.rings.forEach(function(r){r.age+=dt;});P3.rings=P3.rings.filter(function(r){return r.age<1.4;}).slice(-24);
-    var cue=!active?'请将手掌放回画面，微光会等你回来':
-      P3.beat===1?(P3.vortex>.2?'漩涡正在卷入光尘，光群逐渐生长':'缓缓画圈卷起光尘，或张开手掌等待光灵采集'):
-      P3.beat===2?(P3.splitReady?'把手移回中央，让两群微光相遇':P3.merging?'青蓝与金色正在交汇…':'单手快速移向左右两侧分群，再回中合拢；也可双手分开'):
-      P3.beat===3?'跟着光圈的节奏张手、握拳；慢一些也能继续生长':'光尘渐息，让新生的微光汇向深处';
-    herdCue.textContent=cue;
-    herdProgress.textContent=P3.beat===1?'光尘 '+Math.min(12,P3.collected)+' / 12':
-      P3.beat===2?'青蓝 × 金 → 青绿':P3.beat===3?'光灵 '+spirits.length+' / '+P3.target:'光灵 '+spirits.length+' · 繁衍完成';
+    if(P3.fusion && P3.beat===2 && active){
+      P3.fusion.age+=dt;
+      if(P3.fusion.age>1.8&&!P3.fusion.queued){
+        P3.fusion.queued=true;queueBloomBirth(P3.budget[1],P3.fusion.x,P3.fusion.y,null,P3.mixedColor,'fusion');
+      }
+      if(P3.fusion.age>4.2&&!P3.births.length)setBloomBeat(3);
+    }
+    if(P3.beat===3)updateBloomRhythm(dt,active,g);
+    updateBloomBirths(dt,active);
+    if(active&&P3.beat===1&&P3.nurseries.every(function(n){return n.state==='hatched';})&&!P3.births.length)setBloomBeat(2);
+    if(P3.beat===3&&P3.seeds.every(function(s){return s.mature;})&&!P3.births.length&&spirits.length>=P3.target){
+      P3.complete=true;setBloomBeat(4);P3.pulse=1;
+    }
+    P3.pulse=Math.max(0,P3.pulse-dt*1.8);
+    P3.seeds.forEach(function(s){s.pulse=Math.max(0,s.pulse-dt*1.7);});
+    P3.rings.forEach(function(r){r.age+=dt;});P3.rings=P3.rings.filter(function(r){return r.age<2;}).slice(-9);
+    updateBloomHud(active);
+  }
+  function updateBloomHud(active) {
+    var cue='',progress='';
+    if(P3.beat===1){
+      var n=P3.activeNest>=0?P3.nurseries[P3.activeNest]:null;
+      cue=n?(n.state==='contract'?'微光正在苏醒，稍等它舒展尾鳍':
+        n.assist?'在光核旁张开手掌，也能引来缓慢的尘流':'在这枚光核旁缓缓画圈，让光尘流进内芯'):
+        '靠近青蓝或金色光核，缓缓画圈滋养它';
+      progress='青蓝 '+Math.min(3,P3.nurseries[0].energy).toFixed(1)+' / 3 · 金 '+Math.min(3,P3.nurseries[1].energy).toFixed(1)+' / 3';
+    }else if(P3.beat===2){
+      cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，新的生命沿螺旋舒展':'新色正从相遇的地方，传向每一只光灵'):
+        P3.merging?'让两群微光靠近，等待它们真正相遇':P3.splitReady?
+        (P3.separated?'回到中央让它们融合；慢回中或快回中，会有不同回应':'青蓝与金色正在游开，稍等它们形成双群'):
+        '单手左右移动分群，再回中合拢；双手也可分别牵引';
+      progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):'青蓝 × 金 → 青绿';
+    }else if(P3.beat===3){
+      var r=P3.rhythm,mature=P3.seeds.filter(function(s){return s.mature;}).length;
+      cue=r.intro>0?'三枚种子等待回应：跟着光圈，展开、合拢、展开、合拢':
+        r.assist?'慢慢张开，再轻轻合拢；每次交替都在滋养种子':
+        r.cooldown>0?'一枚种子舒展开了，新的光灵正在加入':
+        (Math.floor(r.time/.8)%2===0?'张开手掌，让光圈舒展':'轻轻握拳，让光圈收拢');
+      progress='共振 '+mature+' / 3 · 光灵 '+spirits.length+' / '+P3.target;
+    }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
+    if(bloomMix<.85)cue='海盆渐渐展开，青蓝与金色的光核正在苏醒';
+    else if(!active&&P3.beat!==4)cue='请将手掌放回画面，光核与种子会保留你的进度';
+    herdCue.textContent=cue;herdProgress.textContent=progress;
     herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
   }
+
+
   function drawBloomEnvironment() {
     if(scene!==SCENE.BLOOM)return;
     var t=easeInOutCubic(bloomMix), u=p2Unit(), side=Math.max(W/1536,H/1024);
@@ -1643,37 +1824,143 @@
       ctx.save();ctx.globalAlpha=alpha[i];if(i===1)ctx.filter='brightness(1.08)';
       ctx.drawImage(P3Art.images[key],W/2-w/2+dx,H/2-h/2+dy,w,h);ctx.restore();
     });
+    if(P3.mixedColor){
+      var c=P3.mixedColor,glow=ctx.createRadialGradient(W*.5,H*.86,0,W*.5,H*.86,Math.max(W,H)*.6);
+      glow.addColorStop(0,rgbaStr(c,.045));glow.addColorStop(1,rgbaStr(c,0));
+      ctx.save();ctx.globalCompositeOperation='lighter';ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);ctx.restore();
+    }
     if(bloomBackdrop){ctx.save();ctx.globalAlpha=1-t;ctx.drawImage(bloomBackdrop,0,0,W,H);ctx.restore();}
   }
-  function drawBloomEffects(nowS) {
+  function drawBloomAura(p,x,y,r,color,alpha) {
+    p.noStroke();
+    for(var layer=4;layer>=1;layer--){
+      p.fill(color[0],color[1],color[2],alpha*(layer===1?.45:.035));
+      p.circle(x,y,r*layer);
+    }
+  }
+  function drawBloomNursery(p,n,index,fade,u) {
+    var pos=bloomScreen(n.x,n.y),ghost=P3.beat>1;
+    var alpha=fade*(ghost?.11:1)*(P3.beat===4?1-P3.completion:1);
+    var breath=.85+Math.sin(P3.clock*(index?1.05:1.4)+index)*.15;
+    var mature=n.state==='contract'?1-clamp(n.hatchAge/.9,0,1)*.24:1;
+    var opened=n.state==='hatched'?Math.min(1,(n.hatchAge-.9)/1.5):0;
+    var radius=(42+opened*15)*u*mature;
+    drawBloomAura(p,pos.x,pos.y,(16+n.energy*3+n.pulse*8)*u,n.color,alpha*(60+n.energy*24)*breath);
+    p.noFill();p.strokeWeight(Math.max(.7,u));
+    for(var k=0;k<3;k++){
+      var a=-Math.PI/2+k*Math.PI*2/3+Math.sin(P3.clock*.3+index)*.08;
+      var charge=clamp(n.energy-k,0,1);
+      p.stroke(n.color[0],n.color[1],n.color[2],(48+charge*125)*alpha);
+      p.beginShape();
+      for(var j=0;j<=18;j++){
+        var t=j/18,angle=a+t*1.65;
+        var r=radius*(1+opened*Math.sin(t*Math.PI)*.35);
+        p.vertex(pos.x+Math.cos(angle)*r,pos.y+Math.sin(angle)*r*.84);
+      }p.endShape();
+    }
+    if(!ghost){
+      p.noStroke();p.fill(235,246,250,125*alpha);p.circle(pos.x,pos.y,(4+n.energy)*u);
+      p.textAlign(bloomP5.CENTER);p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
+      p.fill(n.color[0],n.color[1],n.color[2],180*alpha);
+      var label=n.state==='hatched'?'新生':n.state==='contract'?'苏醒中':(index?'金色光核':'青蓝光核');
+      p.text(label,pos.x,pos.y+radius+22*Math.max(.65,u));
+      if(n.assist&&P3.activeNest===index&&n.state!=='hatched'){
+        p.noFill();p.stroke(n.color[0],n.color[1],n.color[2],80*alpha);p.strokeWeight(Math.max(.7,u));
+        var a=P3.clock*.7;p.beginShape();
+        for(var j=0;j<=20;j++){var angle=a+j/20*2;var r=radius+15*u;p.vertex(pos.x+Math.cos(angle)*r,pos.y+Math.sin(angle)*r*.84);}p.endShape();
+      }
+    }
+  }
+  function drawBloomEffects() {
     if(scene!==SCENE.BLOOM || !bloomP5)return;
     var scale=Math.min(1,1100/Math.max(W,H)),fw=Math.max(1,Math.round(W*scale)),fh=Math.max(1,Math.round(H*scale));
     if(!bloomFx || bloomFx.width!==fw || bloomFx.height!==fh){
       if(bloomFx)bloomFx.remove();bloomFx=bloomP5.createGraphics(fw,fh);bloomFx.pixelDensity(1);
     }
-    var p=bloomFx;p.clear();p.push();p.scale(scale);p.blendMode(bloomP5.ADD);p.noStroke();
-    var fade=easeInOutCubic(bloomMix),dustFade=fade*(P3.beat===4?1-P3.completion:1),u=p2Unit();
+    var p=bloomFx;p.clear();p.push();p.scale(scale);p.blendMode(bloomP5.ADD);
+    var fade=easeInOutCubic(bloomMix),u=p2Unit(),dustFade=fade*(P3.beat===4?1-P3.completion:1);
     P3.dust.forEach(function(d){
-      var s=bloomScreen(d.x,d.y),r=d.size*Math.max(.6,u),a=(.55+.45*Math.sin(nowS*1.3+d.phase))*dustFade;
-      p.fill(255,243,214,16*a);p.circle(s.x,s.y,r*7);
-      p.fill(255,243,214,185*a);p.circle(s.x,s.y,r*1.5);
+      var s=bloomScreen(d.x,d.y),r=d.size*Math.max(.6,u);
+      var a=(.55+.45*Math.sin(P3.clock*1.3+d.phase))*dustFade*(d.edible?1:.35);
+      p.noStroke();p.fill(255,243,214,12*a);p.circle(s.x,s.y,r*7);
+      p.fill(d.edible?255:156, d.edible?243:192,d.edible?214:215,155*a);p.circle(s.x,s.y,r*1.5);
     });
+    P3.nurseries.forEach(function(n,i){drawBloomNursery(p,n,i,fade,u);});
     var center=bloomScreen(P3.leader.x,P3.leader.y);
-    if(P3.vortex>.02){
+    if(P3.beat===1&&P3.activeNest>=0){
+      var n=P3.nurseries[P3.activeNest],q=bloomScreen(n.x,n.y);
+      var strength=Math.max(P3.vortex,n.assist&&n.openHold>.65?.28:0);
+      if(strength>.02){
+        p.noFill();p.stroke(n.color[0],n.color[1],n.color[2],35*strength*fade);p.strokeWeight(Math.max(.6,u));
+        p.bezier(center.x,center.y,center.x+35*u,center.y-60*u,q.x-35*u,q.y+50*u,q.x,q.y);
+      }
+    }
+    if(P3.beat===1&&P3.vortex>.02){
       p.noFill();p.strokeWeight(Math.max(.6,u));
-      for(var k=0;k<5;k++){
-        p.stroke(120,201,242,45*P3.vortex*fade);p.beginShape();
-        for(var j=0;j<=36;j++){
-          var angle=j/36*Math.PI*2+nowS*(P3.turn||1)*.6+k*1.256;
-          var r=(25+j*3.6)*u;var wobble=(bloomP5.noise(j*.1,k,nowS*.1)-.5)*9*u;
-          p.vertex(center.x+Math.cos(angle)*(r+wobble),center.y+Math.sin(angle)*r*.75);
+      for(var k=0;k<4;k++){
+        p.stroke(120,201,242,37*P3.vortex*fade);p.beginShape();
+        for(var j=0;j<=32;j++){
+          var a=j/32*Math.PI*2+P3.clock*(P3.turn||1)*.6+k*Math.PI/2;
+          var r=(20+j/32*P3.vortexRadius*.8)*u;
+          p.vertex(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r*.75);
         }p.endShape();
       }
     }
-    p.noFill();
-    P3.rings.forEach(function(r){var s=bloomScreen(r.x,r.y),a=(1-r.age/1.4)*fade;
-      p.stroke(r.color[0],r.color[1],r.color[2],65*a);p.strokeWeight(Math.max(.6,u));
-      p.ellipse(s.x,s.y,(20+r.age*150)*u,(20+r.age*150)*u*.78);
+    if(P3.beat===2&&P3.split>.1&&!P3.fusion&&P3.centers){
+      P3.centers.forEach(function(c,i){
+        var q=bloomScreen(c.x,c.y),color=i?P3_PALETTE[2]:P3_PALETTE[0];
+        p.noFill();p.stroke(color[0],color[1],color[2],35*P3.split*fade);p.strokeWeight(Math.max(.6,u));
+        p.beginShape();for(var j=0;j<=40;j++){
+          var a=j/40*Math.PI*1.6+P3.clock*.3*(i?1:-1),r=(80+j*.6)*u;
+          p.vertex(q.x+Math.cos(a)*r,q.y+Math.sin(a)*r*.67);
+        }p.endShape();
+      });
+    }
+    if(P3.fusion&&P3.fusion.age<4.2&&P3.beat===2){
+      var f=P3.fusion,q=bloomScreen(f.x,f.y),color=P3.mixedColor;
+      var env=Math.sin(clamp(f.age/4.2,0,1)*Math.PI)*fade;
+      drawBloomAura(p,q.x,q.y,(22+f.age*7)*u,color,env*70);
+      p.noFill();p.strokeWeight(Math.max(.75,u));
+      if(f.style==='surge'){
+        for(var k=0;k<3;k++){
+          p.stroke(color[0],color[1],color[2],70*env);p.beginShape();
+          for(var j=0;j<=44;j++){
+            var a=j/44*Math.PI*2+f.age*1.4+k*Math.PI*2/3;
+            var r=(15+j*2.6+f.age*22)*u;
+            p.vertex(q.x+Math.cos(a)*r,q.y+Math.sin(a)*r*.75);
+          }p.endShape();
+        }
+      }else{
+        [-1,1].forEach(function(side){
+          p.stroke(color[0],color[1],color[2],65*env);
+          p.ellipse(q.x+side*(45-f.age*8)*u,q.y,(120+f.age*30)*u,(85+f.age*16)*u);
+        });
+      }
+    }
+    var seedFade=P3.beat===2&&P3.fusion?clamp((P3.fusion.age-1.8)/1.5,0,1):P3.beat===3?1:0;
+    if(seedFade>0)P3.seeds.forEach(function(seed,i){
+      var pos=bloomSeedPosition(i),q=bloomScreen(pos.x,pos.y),color=P3.mixedColor;
+      var breathe=.8+.2*Math.sin(P3.clock*1.5+i*2),opening=seed.mature?clamp(seed.age/1.5,0,1):0;
+      var a=seedFade*fade*(seed.mature?1-opening*.75:1);
+      drawBloomAura(p,q.x,q.y,(18+seed.progress*7+seed.pulse*6)*u,color,(65+seed.progress*55)*a*breathe);
+      p.noFill();p.stroke(color[0],color[1],color[2],155*a);p.strokeWeight(Math.max(.7,u));
+      p.ellipse(q.x,q.y,(20+opening*25)*u,(32+opening*30)*u);
+      p.noStroke();p.fill(240,250,245,145*a);p.circle(q.x,q.y,(5+seed.progress*2)*u);
+    });
+    if(P3.beat===3){
+      var r=P3.rhythm,spread=.8+.2*Math.cos(r.time/.8*Math.PI),radius=(35+spread*14)*u;
+      p.noFill();p.stroke(P3.mixedColor[0],P3.mixedColor[1],P3.mixedColor[2],(22+P3.pulse*45)*fade);
+      p.strokeWeight(Math.max(.7,u));p.ellipse(center.x,center.y,radius*2,radius*1.55);
+      for(var i=0;i<4;i++){
+        var a=-Math.PI/2+i*Math.PI/2; p.noStroke();
+        p.fill(220,239,242,(i===Math.floor(r.time/.8)%4?150:35)*fade);
+        p.circle(center.x+Math.cos(a)*(radius+9*u),center.y+Math.sin(a)*(radius+9*u)*.78,Math.max(2.5,4*u));
+      }
+    }
+    p.noFill();P3.rings.forEach(function(r){
+      var q=bloomScreen(r.x,r.y),a=(1-r.age/2)*fade;
+      p.stroke(r.color[0],r.color[1],r.color[2],55*a);p.strokeWeight(Math.max(.6,u));
+      p.ellipse(q.x,q.y,(25+r.age*130)*u,(25+r.age*130)*u*.78);
     });
     p.pop();ctx.save();ctx.globalCompositeOperation='lighter';ctx.drawImage(p.canvas,0,0,W,H);ctx.restore();
   }
@@ -2326,7 +2613,14 @@
       count:spirits.length,clock:P3.clock,blend:bloomMix,assetsReady:P3Art.ready,
       p5Ready:!!bloomP5,p5Drawn:!!bloomFx,leader:{x:P3.leader.x,y:P3.leader.y},
       camera:{x:P3.camera.x,y:P3.camera.y},colors:spirits.map(function(s){return s.bloomColor;}),
-      dustCount:P3.dust.length};},
+      dustCount:P3.dust.length,version:5,startCount:P3.startCount,budget:P3.budget.slice(),
+      pending:P3.births.reduce(function(sum,b){return sum+b.remaining;},0),
+      nurseries:P3.nurseries.map(function(n){var q=bloomScreen(n.x,n.y);return {x:n.x,y:n.y,sx:q.x,sy:q.y,dust:n.dust,energy:n.energy,state:n.state,assist:n.assist};}),
+      seeds:P3.seeds.map(function(s){return {mature:s.mature,progress:s.progress};}),
+      separation:P3.separation||0,separated:P3.separated,mergeStyle:P3.mergeStyle,
+      fusion:P3.fusion&&{style:P3.fusion.style,age:P3.fusion.age},
+      rhythm:P3.rhythm&&{time:P3.rhythm.time,index:P3.rhythm.index,phrase:P3.rhythm.phrase,assist:P3.rhythm.assist,
+        edges:P3.rhythm.assistEdges,failed:P3.rhythm.failed,intro:P3.rhythm.intro,cooldown:P3.rhythm.cooldown}};},
     bloomBodies: function(){return spirits.map(function(s){return {x:s.wx,y:s.wy};});},
     previewPhase3: function(){
       this.previewPhase2("wide");P2.progress=1;P2.travel=5100;P2.leader.x=5100;

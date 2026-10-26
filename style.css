@@ -111,7 +111,7 @@ body {
   letter-spacing: .2em;
   opacity: .45;
 }
-.herd-hud:not([data-beat="2"]):not([data-beat="3"]):not([data-beat="4"]) .herd-progress { opacity: 0; }
+.herd-hud:not([data-phase="3"]):not([data-beat="2"]):not([data-beat="3"]):not([data-beat="4"]) .herd-progress { opacity: 0; }
 .herd-cue {
   position: absolute;
   left: 10%;
