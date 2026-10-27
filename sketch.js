@@ -242,7 +242,7 @@
       var worldPos = p2Screen(P2.leader.x, P2.leader.y);
       ember.x = worldPos.x; ember.y = worldPos.y;
       ember.scale += (.45 - ember.scale) * Math.min(dt * .8, 1);
-      ember.speed = Math.abs(P2.scrollVX) * p2Unit();
+      ember.speed = Math.hypot(P2.scrollVX,P2.leaderVY) * p2Unit();
       return;
     }
     var scaleT = ember.lit ? 0.45 : 1;
@@ -303,6 +303,15 @@
   }
 
   /* ---------- 火种层绘制（加色混合发光；阶段一中火种即掌心光晕） ---------- */
+  // 火种与孵光核共用连续渐变，避免同心圆叠加形成生硬的光圈边缘。
+  function drawSoftEmberGlow(dc,x,y,r,color,alpha) {
+    if(r<=0||alpha<=0)return;
+    var g=dc.createRadialGradient(x,y,0,x,y,r);
+    g.addColorStop(0,rgbaStr(color,alpha));
+    g.addColorStop(.4,rgbaStr(color,alpha*.35));
+    g.addColorStop(1,rgbaStr(color,0));
+    dc.fillStyle=g;dc.beginPath();dc.arc(x,y,r,0,Math.PI*2);dc.fill();
+  }
   function drawEmberLayer(nowS, dt) {
     var pos = emberPos();
     var awaken = scene === SCENE.AWAKEN || scene === SCENE.HERD || scene === SCENE.BLOOM;   // 阶段一/二：火种即掌心光晕
@@ -333,16 +342,9 @@
       var pinching = hand.pinch.active;
       var br = 0.92 + 0.08 * Math.sin(nowS * 2.2);
       var pr = Math.min(W, H) * (pinching ? 0.026 : 0.042) * br;
-      var col = pinching ? "255, 226, 170" : "255, 240, 208";
+      var col = pinching ? [255,226,170] : [255,240,208];
       var pa = master * (pinching ? 0.42 : 0.28);
-      var gp = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, pr * 2.2);
-      gp.addColorStop(0, "rgba(" + col + "," + pa.toFixed(3) + ")");
-      gp.addColorStop(0.4, "rgba(" + col + "," + (pa * 0.35).toFixed(3) + ")");
-      gp.addColorStop(1, "rgba(" + col + ",0)");
-      ctx.fillStyle = gp;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, pr * 2.2, 0, Math.PI * 2);
-      ctx.fill();
+      drawSoftEmberGlow(ctx,pos.x,pos.y,pr*2.2,col,pa);
     } else if (haloR > 0.5) {
       // 外层暖光晕（仪式 / 点亮演出）
       var g = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, haloR);
@@ -833,7 +835,7 @@
       camera: { x: 0, y: 0 }, frameShift: { x: 0, y: 0 }, leader: null,
       route: 0, routeLocked: false, routeChoice: -1, preview: false,
       completion: 0, cueClock: 0, assetWait: 0, progress: 0, blocked: false,
-      dust: [], dustReady: false, dustFx: [] };
+      dust: [], dustReady: false, dustFx: [], entrySlide:0, exitAge:0, exitSlide:0 };
     if (herdHud) herdHud.hidden = true;
     if (herdProgress) herdProgress.textContent = "0%";
   }
@@ -920,9 +922,12 @@
     herdHud.dataset.phase="2";document.querySelector(".herd-chapter").textContent="02 / THE DESCENT";
     scene = SCENE.HERD; sceneClock = 0;
     var u = p2Unit(), pos = emberPos();
-    P2.leader = { x: -520, y: p2RouteAt(0).y };
-    P2.camera.x = P2.leader.x - (pos.x - W / 2) / u;
+    // 通道在右侧等待；保留阶段一火种的屏幕位置，不将它拉回画面中央。
+    var edge=Math.max(W*.78,pos.x+W*.16);
+    P2.camera.x=(W/2-edge)/u;
+    P2.leader = { x: P2.camera.x+(pos.x-W/2)/u, y: p2RouteAt(0).y };
     P2.camera.y = P2.leader.y - (pos.y - H * .47) / u;
+    P2.entrySlide=Math.max(0,(W+40-edge)/u);
     spirits.forEach(function (s, i) {
       s.lane = i; s.straggleT = 0; s.shadowDim = 1;
       s.wx = P2.camera.x + (s.x - W / 2) / u;
@@ -938,9 +943,15 @@
 
   function setHerdBeat(beat) {
     P2.beat = beat; P2.beatClock = 0; P2.cueClock = 0;
+    if(beat===4){P2.exitAge=0;P2.exitSlide=Math.max(0,p2Screen(4800,0).x/p2Unit())+100;}
     if (herdTitle) herdTitle.textContent = beat === 2 ? (P2.route ? "采尘深径" : "回澜长廊") : beat === 4 ? "微光仍在" : beat === 1 ? "选择航道" : "放牧";
     if (herdCue) herdCue.textContent = beat === 4 ? "光群穿过了海沟，你守住了这片微光" : "手放上半屏选宽缝，下半屏选窄缝；移向右侧启程";
     if (herdHud) herdHud.dataset.beat = String(beat);
+  }
+
+  function p2RockOffset() {
+    return (P2.entrySlide*(1-easeInOutCubic(morphT))-
+      P2.exitSlide*easeInOutCubic(clamp(P2.exitAge/3.6,0,1)))*p2Unit();
   }
 
   function drawP2Layer(index) {
@@ -958,7 +969,8 @@
         H / 2 - sideY / 2 - (P2.camera.y - 1600) * u * .12, sideX, sideY);
     } else if (index === 3) {
       // 前景仅在地图外缘；不在通道里增加没有碰撞提示的遮挡。
-      ctx.globalAlpha = .42 * fade;
+      ctx.globalAlpha = .42 * P2Art.fade;
+      ctx.translate(p2RockOffset(),0);
       var top = p2Screen(0, -360), bottom = p2Screen(0, 3100);
       ctx.drawImage(P2Art.images.front, top.x, top.y, 4800 * u, 420 * u);
       ctx.drawImage(P2Art.images.front, bottom.x, bottom.y, 4800 * u, 420 * u);
@@ -1035,6 +1047,7 @@
     var compact = P2.ballT > 0;
     var x = P2.leader.x + s.swimX * (compact ? .2 : 1);
     var y = P2.leader.y + s.swimY * (compact ? .2 : 1) + Math.sin(nowS * 1.1 + s.wanderPh) * (compact ? 3 : 14);
+    if(!P2.routeLocked)x=Math.min(x,-30);
     s.dustTarget = null;
     if (!compact && !P2.shadow && P2.routeLocked) {
       var best = 180 * 180;
@@ -1181,7 +1194,7 @@
   function updatePhase2(dt, nowS) {
     P2.beatClock += dt; P2.cueClock += dt; P2.assetWait += dt;
     if (P2Art.ready) { morphT = Math.min(1, morphT + dt / 4.5); P2Art.fade = Math.min(1, P2Art.fade + dt / 2); }
-    var oldCX = P2.camera.x, oldCY = P2.camera.y;
+    var oldCX = P2.camera.x, oldCY = P2.camera.y, entryShiftX=0, entryShiftY=0;
     P2.frameShift.x = 0; P2.frameShift.y = 0;
     if (!P2Art.ready) {
       if (herdCue) herdCue.textContent = P2Art.failed ? "海沟素材未能加载，请刷新后重试" : "水彩海沟正在浮现…";
@@ -1190,17 +1203,41 @@
     if (!P2.dustReady) p2SeedDust();
     if (P2.beat === 0 && morphT >= 1) setHerdBeat(1);
     var active = hand.present || P2.preview, beforeX = P2.leader.x, beforeY = P2.leader.y;
+    if(P2.beat===4)P2.exitAge+=dt;
     P2.scrollVX = 0; P2.leaderVY = 0; P2.blocked = false;
     P2.ballT = hand.present && hand.pinch.active ? .3 : Math.max(0, P2.ballT - dt);
-    if (active && P2.beat >= 1 && P2.beat <= 2) {
+    if (active && P2.beat <= 2) {
       if (!P2.routeLocked) {
-        var choice = P2.preview ? P2.route : (hand.cursor.y / H > .55 ? 1 : 0);
+        var palmY=hand.cursor.y/H;
+        // 中线留出缓冲，避免手部识别的小幅抖动让两条航道反复切换。
+        var choice=P2.preview?P2.route:(P2.route===1?(palmY<.49?0:1):(palmY>.59?1:0));
         P2.route = choice;
         if (choice !== P2.routeChoice) {
           P2.routeChoice = choice; P2.cueClock = 0;
           if (herdTitle) herdTitle.textContent = choice ? "窄缝 · 采尘深径" : "宽缝 · 回澜长廊";
         }
       }
+      if(!P2.routeLocked){
+        // 入场及候选区沿用掌心的位置跟随；只在真正靠近所选水道入口后接管镜头。
+        var entry=p2RouteAt(0),follow=1-Math.exp(-dt*4.5);
+        var entryY=H*(P2.route ? .66 : .36);
+        var previousX=P2.camera.x,previousY=P2.camera.y;
+        P2.camera.x+=((W/2-W*.78)/p2Unit()-P2.camera.x)*(1-Math.exp(-dt*1.25));
+        P2.camera.y+=(entry.y-(entryY-H*.47)/p2Unit()-P2.camera.y)*(1-Math.exp(-dt*1.25));
+        entryShiftX=P2.camera.x-previousX;entryShiftY=P2.camera.y-previousY;
+        // 镜头选道时平移自由水域的世界坐标，火种与光群在屏幕上保持连续。
+        P2.leader.x+=entryShiftX;P2.leader.y+=entryShiftY;
+        spirits.forEach(function(s){s.wx+=entryShiftX;s.wy+=entryShiftY;});
+        var tx=P2.preview?-16:P2.camera.x+(clamp(hand.cursor.x,W*.06,W*.94)-W/2)/p2Unit();
+        var ty=P2.preview?entry.y:P2.camera.y+(clamp(hand.cursor.y,H*.1,H*.86)-H*.47)/p2Unit();
+        tx=Math.min(tx,morphT<1?-160:-16);
+        P2.leader.x+=(tx-P2.leader.x)*follow;
+        P2.leader.y+=(ty-P2.leader.y)*follow;
+        var entryRadius=Math.max(45,(entry.bottom-entry.top)/2-30);
+        if(morphT>=1&&P2.leader.x>=-32&&Math.abs(P2.leader.y-entry.y)<entryRadius){
+          P2.routeLocked=true;setHerdBeat(2);
+        }
+      }else{
       var route = p2RouteAt(P2.leader.x), next = p2RouteAt(P2.leader.x + 12);
       var slope = (next.y - route.y) / 12;
       var vx = P2.preview ? 160 : clamp((hand.cursor.x / W - .35) * 380, -95, 170);
@@ -1211,14 +1248,9 @@
       if (Math.abs(steer) < .14) steer = 0;
       // 中心线只提供弯道随流量，掌心控制的上下速度能探索整片水体；不再吸回固定轨道。
       var dy = p2RouteAt(P2.leader.x + dx).y - route.y + steer * 250 * dt;
-      if (!P2.routeLocked) {
-        dy = clamp(route.y - P2.leader.y, -260 * dt, 260 * dt);
-        if (Math.abs(route.y - P2.leader.y) > 45) dx = Math.min(0, dx);
-      }
       P2.blocked = p2Move(P2.leader, dx, dy, 16);
-      P2.leader.x = Math.max(-620, P2.leader.x);
-      if (P2.leader.x >= -120 && !P2.routeLocked) { P2.routeLocked = true; setHerdBeat(2); }
       if (P2.leader.x < -220 && P2.routeLocked) { P2.routeLocked = false; setHerdBeat(1); }
+      }
       P2.travel = Math.max(P2.travel, P2.leader.x); P2.distance = P2.travel;
       P2.progress = clamp(P2.travel / 4800, 0, 1); P2.passedGaps = P2.progress >= 1 ? 2 : P2.progress >= .5 ? 1 : 0;
       if (P2.leader.x > 5030) {
@@ -1227,14 +1259,15 @@
         spirits.forEach(function (s) { s.flash = .7; });
       }
     }
-    P2.scrollVX = dt > 0 ? (P2.leader.x - beforeX) / dt : 0;
-    P2.leaderVY = dt > 0 ? (P2.leader.y - beforeY) / dt : 0;
+    P2.scrollVX = dt > 0 ? (P2.leader.x-beforeX-entryShiftX)/dt : 0;
+    P2.leaderVY = dt > 0 ? (P2.leader.y-beforeY-entryShiftY)/dt : 0;
     var k = 1 - Math.exp(-dt / .55), look = P2.routeLocked && P2.beat === 2 ? 95 : 0;
-    P2.camera.x += (P2.leader.x + look - P2.camera.x) * k;
+    if(P2.routeLocked&&P2.beat===2)P2.camera.x += (P2.leader.x + look - P2.camera.x) * k;
     var deltaY = P2.leader.y - P2.camera.y, dead = 900 * .1;
-    if (Math.abs(deltaY) > dead) P2.camera.y += clamp((deltaY - Math.sign(deltaY) * dead) * k, -340 * dt, 340 * dt);
+    if(P2.routeLocked&&P2.beat===2&&Math.abs(deltaY)>dead)P2.camera.y += clamp((deltaY-Math.sign(deltaY)*dead)*k,-340*dt,340*dt);
     var u = p2Unit();
-    P2.frameShift.x = (oldCX - P2.camera.x) * u; P2.frameShift.y = (oldCY - P2.camera.y) * u;
+    P2.frameShift.x = (oldCX-P2.camera.x+entryShiftX)*u;
+    P2.frameShift.y = (oldCY-P2.camera.y+entryShiftY)*u;
     if (active && P2.beat === 2) updateShadow(dt);
     else if (!active) { P2.prevPinch = false; P2.pinchHold = 0; }
     projectP2Encounter();
@@ -1245,7 +1278,7 @@
     if (P2.beat >= 1 && P2.beat <= 2 && herdCue) {
       herdCue.textContent = !active ? "请将手掌放回画面，旅程会在原处继续" : P2.shadow ?
         (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.shadow.pass === 2 ? "黑影徘徊：捏合蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，捏合收拢光群") :
-        P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "上下移动掌心，自由探索水道；靠近光尘让光灵进食" : "手放上半屏选宽缝，下半屏选窄缝；移向右侧启程";
+        P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "上下移动掌心，自由探索水道；靠近光尘让光灵进食" : "火种会跟着掌心自由游动；上下选择水道，对准右侧入口启程";
     }
     if(P2.progress>.55 && !P3Art.error && !bloomRuntimeError) initPhase3Art();
     if(P2.beat===4){
@@ -1266,7 +1299,8 @@
   function drawReefs(nowS) {
     if (scene !== SCENE.HERD || !P2Art.ready || morphT < .02) return;
     var u = p2Unit(), origin = p2Screen(0, 0);
-    ctx.save(); ctx.globalAlpha = .94 * easeInOutCubic(morphT) * P2Art.fade;
+    ctx.save(); ctx.globalAlpha = .94 * P2Art.fade;
+    ctx.translate(p2RockOffset(),0);
     ctx.drawImage(P2Art.images.reef, origin.x, origin.y, 4800 * u, 3200 * u);
     ctx.globalCompositeOperation = "lighter";
     P2.dust.forEach(function (dust) {
@@ -1320,7 +1354,7 @@
      只有主 tick 推进模拟，p5.noLoop 避免双重动画时钟。
      ============================================ */
   var P3 = {}, P3Art = { images: {}, ready: false, loading: false, error: null };
-  var bloomMix = 0, bloomBackdrop = null;
+  var bloomMix = 0, bloomBackdrop = null, bloomExitRocks = null;
   var bloomP5 = null, bloomFx = null, bloomRuntime = null, bloomRuntimeError = null;
   var bloomAudio = null, bloomAudioEnabled = true;
   var P3_PALETTE = [[79,195,247], [155,126,222], [242,193,78], [106,224,174]];
@@ -1338,12 +1372,12 @@
       split:0,splitReady:false,mergeHold:0,lastSide:0,sideAt:-10,splitAt:0,separated:false,
       merging:false,mergeStyle:'gentle',fusion:null,prevSpacing:null,wasCentered:false,
       pulse:0,beatIndex:-1,rhythmHits:0,rhythm:null,grow:0,target:60,startCount:0,
-      complete:false,completion:0,budget:[0,0,0],births:[],birthTimer:0,activeNest:-1,
+      complete:false,completion:0,budget:[0,0,0],births:[],birthTimer:0,activeNest:-1,nurseryVisibility:1,
       nurseries:[{x:680,y:535,color:P3_PALETTE[0].slice()},{x:1120,y:605,color:P3_PALETTE[2].slice()}],
       seeds:[{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0}]};
     P3.nurseries.forEach(function(n){Object.assign(n,{dust:0,energy:0,state:'sleeping',pulse:0,
-      hatchAge:0,cooldown:0,nearTime:0,openHold:0,assist:false});});
-    bloomMix=0;bloomBackdrop=null;
+      hatchAge:0,cooldown:0,nearTime:0,openHold:0,assist:false,visualEnergy:0,visualPulse:0});});
+    bloomMix=0;bloomBackdrop=null;bloomExitRocks=null;
     var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
   }
 
@@ -1446,11 +1480,16 @@
   function enterBloom() {
     if (scene===SCENE.BLOOM || !P3Art.ready || !bloomP5) return;
     var u=p2Unit(), ep=emberPos();
-    // 单独捕获旧环境；原有光群持续游动，交融时不会复制旧光灵。
+    // 水体交融与岩壁滑出分层，岩壁继续沿阶段二的退场进度向左移动。
     var old=document.createElement('canvas');old.width=canvas.width;old.height=canvas.height;
     var previousContext=ctx;ctx=old.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
-    ctx.fillStyle='#06121f';ctx.fillRect(0,0,W,H);drawFarReefs();drawReefs(performance.now()/1000);drawP2Layer(3);ctx=previousContext;
+    ctx.fillStyle='#06121f';ctx.fillRect(0,0,W,H);drawFarReefs();
+    var rocks=document.createElement('canvas');rocks.width=canvas.width;rocks.height=canvas.height;
+    ctx=rocks.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+    drawReefs(performance.now()/1000);drawP2Layer(3);ctx=previousContext;
     resetPhase3();bloomBackdrop=old;
+    if(P2.exitAge<3.6)bloomExitRocks={image:rocks,age:P2.exitAge,
+      from:easeInOutCubic(clamp(P2.exitAge/3.6,0,1)),slide:P2.exitSlide};
     P3.leader={x:900+(ep.x-W/2)/u,y:560+(ep.y-H*.47)/u};
     P3.startCount=spirits.length;P3.target=Math.max(60,spirits.length*2);morphT=1;
     var growth=P3.target-P3.startCount;
@@ -1638,6 +1677,8 @@
       var d=Math.hypot(P3.leader.x-n.x,P3.leader.y-n.y);
       if(n.state!=='hatched'&&d<distance){distance=d;nearest=i;}
       n.pulse=Math.max(0,n.pulse-dt*1.8);n.cooldown=Math.max(0,n.cooldown-dt);
+      n.visualEnergy+=(n.energy-n.visualEnergy)*(1-Math.exp(-dt*2.8));
+      n.visualPulse+=(n.pulse-n.visualPulse)*(1-Math.exp(-dt*5));
       if(active&&d<165&&n.state!=='hatched'){
         n.nearTime+=dt;
         n.openHold=g==='Gather'?n.openHold+dt:0;
@@ -1739,7 +1780,12 @@
   }
   function updatePhase3(dt) {
     P3.clock+=dt;P3.beatClock+=dt;bloomMix=clamp(bloomMix+dt/5.5,0,1);
+    P3.nurseryVisibility+=((P3.beat>1?.12:1)-P3.nurseryVisibility)*(1-Math.exp(-dt*1.5));
     if(bloomMix===1)bloomBackdrop=null;
+    if(bloomExitRocks){
+      bloomExitRocks.age+=dt;
+      if(bloomExitRocks.age>=3.6)bloomExitRocks=null;
+    }
     var active=dt>0&&hand.present&&bloomMix>.85,g=active?currentGesture():'Neutral';
     if(active){P3.activeTime+=dt;updateBloomInput(dt);}
     else{P3.path=[];P3.lastSide=0;P3.inputLast=null;P3.inputSpeed=0;P3.returnPeak=0;P3.mergeHold=0;P3.wasCentered=false;}
@@ -1830,6 +1876,10 @@
       ctx.save();ctx.globalCompositeOperation='lighter';ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);ctx.restore();
     }
     if(bloomBackdrop){ctx.save();ctx.globalAlpha=1-t;ctx.drawImage(bloomBackdrop,0,0,W,H);ctx.restore();}
+    if(bloomExitRocks){
+      var exit=bloomExitRocks,shift=-exit.slide*u*(easeInOutCubic(clamp(exit.age/3.6,0,1))-exit.from);
+      ctx.save();ctx.drawImage(exit.image,shift,0,W,H);ctx.restore();
+    }
   }
   function drawBloomAura(p,x,y,r,color,alpha) {
     p.noStroke();
@@ -1840,35 +1890,42 @@
   }
   function drawBloomNursery(p,n,index,fade,u) {
     var pos=bloomScreen(n.x,n.y),ghost=P3.beat>1;
-    var alpha=fade*(ghost?.11:1)*(P3.beat===4?1-P3.completion:1);
-    var breath=.85+Math.sin(P3.clock*(index?1.05:1.4)+index)*.15;
-    var mature=n.state==='contract'?1-clamp(n.hatchAge/.9,0,1)*.24:1;
-    var opened=n.state==='hatched'?Math.min(1,(n.hatchAge-.9)/1.5):0;
-    var radius=(42+opened*15)*u*mature;
-    drawBloomAura(p,pos.x,pos.y,(16+n.energy*3+n.pulse*8)*u,n.color,alpha*(60+n.energy*24)*breath);
-    p.noFill();p.strokeWeight(Math.max(.7,u));
-    for(var k=0;k<3;k++){
-      var a=-Math.PI/2+k*Math.PI*2/3+Math.sin(P3.clock*.3+index)*.08;
-      var charge=clamp(n.energy-k,0,1);
-      p.stroke(n.color[0],n.color[1],n.color[2],(48+charge*125)*alpha);
-      p.beginShape();
-      for(var j=0;j<=18;j++){
-        var t=j/18,angle=a+t*1.65;
-        var r=radius*(1+opened*Math.sin(t*Math.PI)*.35);
-        p.vertex(pos.x+Math.cos(angle)*r,pos.y+Math.sin(angle)*r*.84);
-      }p.endShape();
+    var time=P3.clock+index*2.7,energy=n.visualEnergy,pulse=n.visualPulse;
+    var breath=.92+.08*Math.sin(time*1.1);
+    var contract=n.state==='contract'?easeInOutCubic(clamp(n.hatchAge/.9,0,1)):
+      n.state==='hatched'?1-easeOutCubic(clamp((n.hatchAge-.9)/.6,0,1)):0;
+    var opened=n.state==='hatched'?easeInOutCubic(clamp((n.hatchAge-.9)/1.5,0,1)):0;
+    var alpha=fade*P3.nurseryVisibility*(1-opened*.78)*(P3.beat===4?1-P3.completion:1);
+    var radius=(54+energy*6+pulse*5)*u*breath*(1-contract*.2+opened*.25);
+    // 轻微浮动、连续柔光和温白灯芯沿用掌心火种的视觉节奏。
+    pos.x+=Math.sin(time*.43)*2.5*u;pos.y+=Math.sin(time*.6)*3*u;
+    var dc=p.drawingContext;dc.save();dc.globalCompositeOperation='lighter';
+    drawSoftEmberGlow(dc,pos.x,pos.y,radius*1.55,n.color,alpha*(.24+energy*.035+pulse*.08));
+    var warm=mixRgb(n.color,[255,243,214],.65);
+    drawSoftEmberGlow(dc,pos.x,pos.y,radius*.53,warm,alpha*(.38+energy*.055));
+    var core=(4.5+energy*.7)*u*breath*(1-contract*.3);
+    dc.fillStyle=rgbaStr([255,248,231],alpha*.93);
+    dc.beginPath();dc.arc(pos.x,pos.y,core,0,Math.PI*2);dc.fill();
+    // 火星从光晕内缓缓升起，生命周期两端透明，不产生突然闪现。
+    if(!ghost)for(var k=0;k<5;k++){
+      var life=(time*(.18+k*.013)+k*.217)%1;
+      var sx=pos.x+(Math.sin(k*8.3)*15+Math.sin(time*.7+k)*4)*u;
+      var sy=pos.y+(10-life*55)*u;
+      drawSoftEmberGlow(dc,sx,sy,3.5*u,warm,Math.sin(life*Math.PI)*alpha*.35);
     }
+    dc.restore();
     if(!ghost){
-      p.noStroke();p.fill(235,246,250,125*alpha);p.circle(pos.x,pos.y,(4+n.energy)*u);
+      // 三颗低亮度能量点保留进度提示，替代持续旋转的分段圆弧。
+      p.noStroke();
+      for(var k=0;k<3;k++){
+        var charged=clamp(energy-k,0,1);
+        p.fill(n.color[0],n.color[1],n.color[2],(35+charged*145)*alpha);
+        p.circle(pos.x+(k-1)*10*u,pos.y+39*u,(2.7+charged)*u);
+      }
       p.textAlign(bloomP5.CENTER);p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
       p.fill(n.color[0],n.color[1],n.color[2],180*alpha);
       var label=n.state==='hatched'?'新生':n.state==='contract'?'苏醒中':(index?'金色光核':'青蓝光核');
-      p.text(label,pos.x,pos.y+radius+22*Math.max(.65,u));
-      if(n.assist&&P3.activeNest===index&&n.state!=='hatched'){
-        p.noFill();p.stroke(n.color[0],n.color[1],n.color[2],80*alpha);p.strokeWeight(Math.max(.7,u));
-        var a=P3.clock*.7;p.beginShape();
-        for(var j=0;j<=20;j++){var angle=a+j/20*2;var r=radius+15*u;p.vertex(pos.x+Math.cos(angle)*r,pos.y+Math.sin(angle)*r*.84);}p.endShape();
-      }
+      p.text(label,pos.x,pos.y+52*u+12*Math.max(.65,u));
     }
   }
   function drawBloomEffects() {
