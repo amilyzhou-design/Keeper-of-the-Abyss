@@ -339,7 +339,7 @@
     if (awaken) {
       // 阶段一：火种 = 掌心光晕 —— 暖色呼吸掌晕贴手而走，捏合时收缩变暖，
       // 常明灯火收在晕心（下方亮芯）
-      var pinching = hand.pinch.active;
+      var pinching = hand.pinch.active || (scene===SCENE.HERD&&P2.ballT>0);
       var br = 0.92 + 0.08 * Math.sin(nowS * 2.2);
       var pr = Math.min(W, H) * (pinching ? 0.026 : 0.042) * br;
       var col = pinching ? [255,226,170] : [255,240,208];
@@ -831,7 +831,7 @@
   function resetPhase2() {
     P2 = { beat: 0, beatClock: 0, scrollVX: 0, leaderVY: 0, distance: 0, travel: 0,
       passedGaps: 0, dustBonus: 0, shadow: null, shadowCount: 0,
-      pinchHold: 0, prevPinch: false, lure: null, ballT: 0, burstDone: false, icon: null,
+      pinchHold: 0, prevPinch: false, lure: null, ballT: 0, contracting:false, burstDone: false, icon: null,
       camera: { x: 0, y: 0 }, frameShift: { x: 0, y: 0 }, leader: null,
       route: 0, routeLocked: false, routeChoice: -1, preview: false,
       completion: 0, cueClock: 0, assetWait: 0, progress: 0, blocked: false,
@@ -841,6 +841,11 @@
   }
 
   function p2Unit() { return Math.min(W, H) / 900; }
+  function p2CompactGesture() {
+    var gesture=currentGesture();
+    // 握拳在放牧阶段表示护住光群；其他阶段仍使用各自的手势含义。
+    return hand.present&&(hand.pinch.active||gesture==='Disperse'||gesture==='Closed_Fist');
+  }
   function p2Screen(x, y) {
     var u = p2Unit();
     return { x: W / 2 + (x - P2.camera.x) * u, y: H * .47 + (y - P2.camera.y) * u };
@@ -1045,8 +1050,8 @@
     s.swimX = lerp(s.swimX, s.swimTX, Math.min(dt * 1.5, 1));
     s.swimY = lerp(s.swimY, s.swimTY, Math.min(dt * 1.5, 1));
     var compact = P2.ballT > 0;
-    var x = P2.leader.x + s.swimX * (compact ? .2 : 1);
-    var y = P2.leader.y + s.swimY * (compact ? .2 : 1) + Math.sin(nowS * 1.1 + s.wanderPh) * (compact ? 3 : 14);
+    var x = P2.leader.x + s.swimX * (compact ? .1 : 1);
+    var y = P2.leader.y + s.swimY * (compact ? .1 : 1) + Math.sin(nowS * 1.1 + s.wanderPh) * (compact ? 1.5 : 14);
     if(!P2.routeLocked)x=Math.min(x,-30);
     s.dustTarget = null;
     if (!compact && !P2.shadow && P2.routeLocked) {
@@ -1079,18 +1084,16 @@
     var target = herdSwimTarget(s, dt, nowS), body = { x: s.wx, y: s.wy };
     s.hitCd = Math.max(0, s.hitCd - dt); s.straggleT = Math.max(0, s.straggleT - dt);
     s.fleeT = Math.max(0, s.fleeT - dt);
-    var desX = (target.x - s.wx) * 1.65 + P2.scrollVX * .65;
-    var desY = (target.y - s.wy) * 1.65 + P2.leaderVY * .45;
-    if (currentGesture() === "Disperse" && P2.ballT <= 0) {
-      var away = Math.atan2(s.wy - P2.leader.y, s.wx - P2.leader.x);
-      desX += Math.cos(away) * 85; desY += Math.sin(away) * 85;
-    }
+    var compact=P2.ballT>0,pull=compact?5.5:2.3;
+    var desX = (target.x-s.wx)*pull+P2.scrollVX*.9;
+    var desY = (target.y-s.wy)*pull+P2.leaderVY*.9;
+    if(P2.contracting)s.fleeT=0; // 再次握拳立即接管，松手时仍保留短暂的释放演出。
     var alignedX = 0, alignedY = 0, neighbors = 0;
     for (var i = 0; i < spirits.length; i++) {
       var other = spirits[i]; if (other === s) continue;
       var dx = s.wx - other.wx, dy = s.wy - other.wy, d = Math.hypot(dx, dy);
-      var space = P2.ballT > 0 ? 13 : 38;
-      if (d > .01 && d < space) { desX += dx / d * (space - d) * 3; desY += dy / d * (space - d) * 3; }
+      var space = compact ? 10 : 38, separation=compact?1.6:3;
+      if (d > .01 && d < space) { desX += dx / d * (space - d) * separation; desY += dy / d * (space - d) * separation; }
       if (d < 115) { alignedX += other.wvx; alignedY += other.wvy; neighbors++; }
     }
     if (neighbors) { desX += (alignedX / neighbors - s.wvx) * .12; desY += (alignedY / neighbors - s.wvy) * .12; }
@@ -1099,12 +1102,13 @@
       var a = k * Math.PI / 4, ax = Math.cos(a), ay = Math.sin(a);
       if (p2Solid(s.wx + ax * 32, s.wy + ay * 32)) { desX -= ax * 90; desY -= ay * 90; }
     }
-    var maxSpeed = P2.ballT > 0 ? 370 : s.dustTarget ? 330 : 300;
+    var maxSpeed = compact ? 720 : 560;
     var speed = Math.hypot(desX, desY);
     if (speed > maxSpeed) { desX *= maxSpeed / speed; desY *= maxSpeed / speed; }
     if (s.fleeT <= 0) {
-      s.wvx = lerp(s.wvx, desX, Math.min(1, dt * 3.6));
-      s.wvy = lerp(s.wvy, desY, Math.min(1, dt * 3.6));
+      var follow=1-Math.exp(-dt*(compact?10:4.8));
+      s.wvx = lerp(s.wvx, desX, follow);
+      s.wvy = lerp(s.wvy, desY, follow);
     }
     var hit = p2Move(body, s.wvx * dt, s.wvy * dt, 8);
     s.wx = body.x; s.wy = body.y;
@@ -1157,7 +1161,7 @@
       projectP2Encounter(); return;
     }
     sh.age += dt;
-    var pinching = hand.present && hand.pinch.active;
+    var pinching = P2.contracting;
     if (pinching) P2.pinchHold += dt;
     else {
       if (hand.present && P2.prevPinch && P2.pinchHold >= 1 && sh.pass === 2 && !P2.lure) {
@@ -1173,7 +1177,7 @@
       }
       P2.pinchHold = 0;
     }
-    P2.prevPinch = pinching; P2.icon = "pinch";
+    P2.prevPinch = pinching; P2.icon = "disperse";
     if (sh.state === "chase" && P2.lure) {
       sh.wx += (P2.lure.wx - sh.wx) * Math.min(dt * 2, 1) + 130 * dt;
       sh.wy += (P2.lure.wy - sh.wy) * Math.min(dt * 2, 1);
@@ -1205,7 +1209,8 @@
     var active = hand.present || P2.preview, beforeX = P2.leader.x, beforeY = P2.leader.y;
     if(P2.beat===4)P2.exitAge+=dt;
     P2.scrollVX = 0; P2.leaderVY = 0; P2.blocked = false;
-    P2.ballT = hand.present && hand.pinch.active ? .3 : Math.max(0, P2.ballT - dt);
+    P2.contracting=p2CompactGesture();
+    P2.ballT = P2.contracting ? .28 : Math.max(0, P2.ballT - dt);
     if (active && P2.beat <= 2) {
       if (!P2.routeLocked) {
         var palmY=hand.cursor.y/H;
@@ -1238,18 +1243,22 @@
           P2.routeLocked=true;setHerdBeat(2);
         }
       }else{
-      var route = p2RouteAt(P2.leader.x), next = p2RouteAt(P2.leader.x + 12);
-      var slope = (next.y - route.y) / 12;
-      var vx = P2.preview ? 160 : clamp((hand.cursor.x / W - .35) * 380, -95, 170);
-      if (hand.pinch.active) vx *= .65;
-      vx /= Math.sqrt(1 + slope * slope);
-      var dx = vx * dt;
-      var steer = P2.preview ? 0 : clamp((hand.cursor.y / H - .5) * 2.6, -1, 1);
-      if (Math.abs(steer) < .14) steer = 0;
-      // 中心线只提供弯道随流量，掌心控制的上下速度能探索整片水体；不再吸回固定轨道。
-      var dy = p2RouteAt(P2.leader.x + dx).y - route.y + steer * 250 * dt;
-      P2.blocked = p2Move(P2.leader, dx, dy, 16);
-      if (P2.leader.x < -220 && P2.routeLocked) { P2.routeLocked = false; setHerdBeat(1); }
+        var dx,dy;
+        if(P2.preview){
+          // 开发预览仍自动沿航道行进，正式交互使用掌心的二维位置。
+          dx=160*dt;dy=p2RouteAt(P2.leader.x+dx).y-p2RouteAt(P2.leader.x).y;
+        }else{
+          var targetX=P2.camera.x+(clamp(hand.cursor.x,W*.06,W*.94)-W/2)/p2Unit();
+          var targetY=P2.camera.y+(clamp(hand.cursor.y,H*.08,H*.9)-H*.47)/p2Unit();
+          var vx=clamp((targetX-P2.leader.x)*6,-340,380);
+          var vy=clamp((targetY-P2.leader.y)*7.5,-500,500);
+          var speed=Math.hypot(vx,vy),limit=P2.contracting?390:520;
+          if(speed>limit){vx*=limit/speed;vy*=limit/speed;}
+          dx=vx*dt;dy=vy*dt;
+        }
+        // 碰撞继续依据同一张岩壁透明度遮罩，不能隔着岩壁追赶掌心。
+        P2.blocked = p2Move(P2.leader, dx, dy, 16);
+        if (P2.leader.x < -220 && P2.routeLocked) { P2.routeLocked = false; setHerdBeat(1); }
       }
       P2.travel = Math.max(P2.travel, P2.leader.x); P2.distance = P2.travel;
       P2.progress = clamp(P2.travel / 4800, 0, 1); P2.passedGaps = P2.progress >= 1 ? 2 : P2.progress >= .5 ? 1 : 0;
@@ -1261,10 +1270,14 @@
     }
     P2.scrollVX = dt > 0 ? (P2.leader.x-beforeX-entryShiftX)/dt : 0;
     P2.leaderVY = dt > 0 ? (P2.leader.y-beforeY-entryShiftY)/dt : 0;
-    var k = 1 - Math.exp(-dt / .55), look = P2.routeLocked && P2.beat === 2 ? 95 : 0;
-    if(P2.routeLocked&&P2.beat===2)P2.camera.x += (P2.leader.x + look - P2.camera.x) * k;
-    var deltaY = P2.leader.y - P2.camera.y, dead = 900 * .1;
-    if(P2.routeLocked&&P2.beat===2&&Math.abs(deltaY)>dead)P2.camera.y += clamp((deltaY-Math.sign(deltaY)*dead)*k,-340*dt,340*dt);
+    var k=1-Math.exp(-dt/.5);
+    if(active&&P2.routeLocked&&P2.beat===2){
+      // 中间区域让火种自由移动，越过活动区后镜头再平滑跟进。
+      var deltaX=P2.leader.x-P2.camera.x,deadX=W/p2Unit()*.2;
+      var deltaY=P2.leader.y-P2.camera.y,deadY=H/p2Unit()*.2;
+      if(Math.abs(deltaX)>deadX)P2.camera.x+=clamp((deltaX-Math.sign(deltaX)*deadX)*k,-420*dt,420*dt);
+      if(Math.abs(deltaY)>deadY)P2.camera.y+=clamp((deltaY-Math.sign(deltaY)*deadY)*k,-500*dt,500*dt);
+    }
     var u = p2Unit();
     P2.frameShift.x = (oldCX-P2.camera.x+entryShiftX)*u;
     P2.frameShift.y = (oldCY-P2.camera.y+entryShiftY)*u;
@@ -1277,8 +1290,10 @@
     if (herdProgress) herdProgress.textContent = (P2.route ? "窄缝 " : "宽缝 ") + Math.round(P2.progress * 100) + "% · 光尘 " + P2.dustBonus;
     if (P2.beat >= 1 && P2.beat <= 2 && herdCue) {
       herdCue.textContent = !active ? "请将手掌放回画面，旅程会在原处继续" : P2.shadow ?
-        (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.shadow.pass === 2 ? "黑影徘徊：捏合蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，捏合收拢光群") :
-        P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "上下移动掌心，自由探索水道；靠近光尘让光灵进食" : "火种会跟着掌心自由游动；上下选择水道，对准右侧入口启程";
+        (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.contracting ?
+          (P2.shadow.pass===2&&P2.pinchHold>=1?"光群已聚拢，张手释放诱饵":"光灵正向火种聚拢，保持握拳护住它们"):
+          P2.shadow.pass === 2 ? "黑影徘徊：握拳蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，握拳让光灵聚向火种") :
+        P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "掌心上下左右移动，火种会跟随；握拳聚拢光群，靠近光尘让它们进食" : "火种会跟着掌心自由游动；上下选择水道，对准右侧入口启程";
     }
     if(P2.progress>.55 && !P3Art.error && !bloomRuntimeError) initPhase3Art();
     if(P2.beat===4){
