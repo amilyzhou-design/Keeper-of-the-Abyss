@@ -12,10 +12,32 @@
   <canvas id="sea"></canvas>
 
   <aside class="journey-status" id="journey-status" hidden role="status">
-    <p>海盆素材尚未加载完成，光群会在出口等候。</p>
+    <p id="journey-message">旅程素材尚未加载完成，光群会在原处等候。</p>
     <button id="journey-retry" type="button">重试加载</button>
   </aside>
   <button class="bloom-sound" id="bloom-sound" type="button" hidden aria-pressed="true">节拍声音：开</button>
+  <button class="ascension-mic" id="ascension-mic" type="button" hidden aria-pressed="false">启用拍手终闪</button>
+
+  <section class="journey-ending" id="journey-ending" hidden aria-labelledby="ending-title">
+    <div class="ending-card">
+      <p class="ending-kicker">KEEPER OF THE ABYSS / ECHOES</p>
+      <h2 id="ending-title">光回到了海里</h2>
+      <p class="ending-english">The light returns to the sea.</p>
+      <div class="ending-rule"></div>
+      <h3>牧光者回响</h3>
+      <dl class="ending-stats">
+        <div><dt>亲手唤醒</dt><dd id="ending-awakened">—</dd></div>
+        <div><dt>穿越礁缝</dt><dd id="ending-gaps">—</dd></div>
+        <div><dt>走过掠影</dt><dd id="ending-shadows">—</dd></div>
+        <div><dt>繁衍至</dt><dd id="ending-population">—</dd></div>
+      </dl>
+      <p class="ending-duration" id="ending-duration"></p>
+      <p class="ending-badge" id="ending-badge" hidden>采尘者 · 走过采尘深径</p>
+      <p class="ending-keepsake">截图，带走这片光</p>
+      <button id="ending-replay" type="button">再次入渊</button>
+      <p class="ending-return">片刻后，海流会带你回到起点</p>
+    </div>
+  </section>
 
   <!-- 开屏内容 -->
   <main class="screen">
@@ -53,7 +75,7 @@
     <p class="herd-cue" id="herd-cue" aria-live="polite"></p>
   </section>
 
-  <!-- p5.js 在阶段二后半程由 sketch.js 按需加载；阶段三实际用于光尘与力场绘制。 -->
+  <!-- p5.js 按需加载；阶段三绘制光尘与力场，阶段四绘制蓄势星环、竖向光河和回响星图。 -->
   <script src="sketch.js"></script>
 </body>
 </html>

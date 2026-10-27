@@ -111,7 +111,7 @@ body {
   letter-spacing: .2em;
   opacity: .45;
 }
-.herd-hud:not([data-phase="3"]):not([data-beat="2"]):not([data-beat="3"]):not([data-beat="4"]) .herd-progress { opacity: 0; }
+.herd-hud:not([data-phase="3"]):not([data-phase="4"]):not([data-beat="2"]):not([data-beat="3"]):not([data-beat="4"]) .herd-progress { opacity: 0; }
 .herd-cue {
   position: absolute;
   left: 10%;
@@ -358,3 +358,29 @@ body {
 /* 长通道进度：手机上让航道、百分比与光尘自然换行。 */
 .herd-progress { max-width: 48vw; white-space: normal; text-align: right; line-height: 1.7; font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .herd-progress { font-size: 11px; max-width: 43vw; } .herd-cue { max-width: 88vw; line-height: 1.9; } }
+
+/* 阶段四：浅海光下保持提示可读，结尾数据独立于画布以适配手机。 */
+.ascension-mic[hidden],.journey-ending[hidden],.ending-badge[hidden]{display:none}
+.ascension-mic{position:fixed;z-index:4;left:max(20px,env(safe-area-inset-left));bottom:max(20px,env(safe-area-inset-bottom));max-width:44vw;padding:8px 13px;border:1px solid #a8cfce55;border-radius:20px;background:#082737bb;color:#d5e7e5;font:inherit;font-size:11px;cursor:pointer}
+.herd-hud[data-phase="4"] .herd-heading{padding:12px 16px;border-radius:12px;background:linear-gradient(120deg,#092b4099,#092b4022)}
+.herd-hud[data-phase="4"] .herd-progress{opacity:.85;padding:6px 12px;border-radius:12px;background:#092b4077;color:#e3eeeb}
+.herd-hud[data-phase="4"] .herd-cue{bottom:max(14%,calc(env(safe-area-inset-bottom) + 68px));color:#e1ede9;text-shadow:0 1px 12px #031726,0 1px 5px #031726}
+.journey-ending{position:fixed;inset:0;z-index:7;display:grid;place-items:center;padding:max(16px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));overflow:auto;color:#1e4858}
+.ending-card{width:min(620px,100%);max-height:94dvh;overflow:auto;text-align:center;padding:clamp(22px,4vmin,42px) clamp(24px,5vmin,54px);border:1px solid #f0f5eab0;border-radius:24px;background:linear-gradient(150deg,#f3f7eae8,#cce1e2da);box-shadow:0 20px 80px #103d5022;backdrop-filter:blur(14px);animation:endingArrive 1.8s ease both}
+.ending-kicker{font-size:9px;letter-spacing:.25em;line-height:1.8;color:#5e8290}
+.ending-card h2{margin-top:17px;font-size:clamp(23px,4vmin,36px);font-weight:300;letter-spacing:.15em;text-indent:.15em}
+.ending-english{font-size:12px;letter-spacing:.09em;margin-top:10px;color:#63818b}
+.ending-rule{height:1px;width:48px;background:#709da566;margin:23px auto}
+.ending-card h3{font-size:13px;font-weight:400;letter-spacing:.3em;color:#426d7a}
+.ending-stats{display:grid;grid-template-columns:1fr 1fr;gap:22px 20px;margin:23px auto}
+.ending-stats dt{font-size:11px;letter-spacing:.15em;color:#658792}.ending-stats dd{font-size:24px;font-weight:300;margin-top:7px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.ending-duration,.ending-badge{font-size:11px;line-height:1.8;color:#527782}.ending-badge{margin:9px auto 0;color:#8b7b4c}
+.ending-keepsake{margin-top:20px;font-size:12px;letter-spacing:.2em;color:#426d7a}
+#ending-replay{margin-top:20px;padding:10px 26px;background:transparent;border:1px solid #7ca6ae77;border-radius:22px;color:#345f70;font:inherit;font-size:12px;letter-spacing:.12em;cursor:pointer}
+.ending-return{margin-top:13px;font-size:10px;letter-spacing:.08em;color:#71909a}
+.screen.returning{animation:returnFromSea 2s ease both}
+@keyframes endingArrive{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+@keyframes returnFromSea{from{opacity:0}to{opacity:1}}
+@media(max-width:600px){.ending-card{padding:24px 22px;border-radius:20px}.ending-stats{gap:18px;margin:21px auto}.ending-stats dd{font-size:22px}.ending-rule{margin:18px auto}.ending-kicker{font-size:8px}.ending-keepsake{margin-top:16px}.herd-hud[data-phase="4"] .herd-heading{padding:9px 11px}.ascension-mic,.bloom-sound{font-size:10px;max-width:44vw}}
+@media(prefers-reduced-motion:reduce){.ending-card,.screen.returning{animation:none}}
+@media(max-height:540px) and (min-width:600px){.ending-card{width:min(760px,95%);padding:15px 24px}.ending-card h2{margin-top:7px;font-size:24px}.ending-english{margin-top:5px;font-size:10px}.ending-rule{margin:10px auto}.ending-card h3{font-size:11px}.ending-stats{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px auto}.ending-stats dd{font-size:21px;margin-top:4px}.ending-keepsake{margin-top:10px;font-size:11px}#ending-replay{margin-top:10px;padding:7px 22px}.ending-return{margin-top:7px}.ending-badge{margin-top:4px}}
