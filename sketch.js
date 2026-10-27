@@ -73,7 +73,7 @@
   var DIVE_DURATION = 3.4;            // 下潜过渡总时长（秒）
   var EMBER_FADEIN_AT = 2.1;          // 火种开始淡入的时刻
   var IGNITE_DURATION = 1.5;          // 点亮演出时长
-  var BEAT1_DELAY = 0.8;              // 点亮后稍歇，第一只光灵更早登场
+  var BEAT1_DELAY = 0.5;              // 点亮稍歇，第一只光灵登场
 
   var W = 0, H = 0, dpr = 1;
   var particles = [];
@@ -543,11 +543,11 @@
   var resonanceFlash = 0; // 首次共鸣的全屏冷白闪光包络
   var BEAT2_TARGET = 20;  // 阶段一推进条件：群体 20 只
   var P1_TIMING = {
-    soloOrbitTurns: 1.5, // 第一只环游约一圈半后，同伴即可苏醒；它仍继续完成两圈
-    gatherHold: 0.6,     // 张手保持多久开始唤醒（秒）
-    wakeInterval: 0.55,  // 后续光灵逐只出现的间隔（秒）
-    resonancePause: 1.0, // 共鸣闪光后的停顿（秒）
-    groupOrbitSeconds: 3.2 // 最后群体环流一圈的时长（秒）
+    soloOrbitTurns: 1.0, // 第一只环游一圈后，同伴加入；它仍继续完成两圈
+    gatherHold: 0.45,    // 张手保持多久开始唤醒（秒）
+    wakeInterval: 0.38,  // 后续光灵逐只出现的间隔（秒）
+    resonancePause: 0.65,// 共鸣闪光后的停顿（秒）
+    groupOrbitSeconds: 2.6 // 最后群体环流一圈的时长（秒）
   };
 
   function newHeroState(name) {
@@ -775,7 +775,7 @@
       P1.gatherHold = Math.max(P1.gatherHold - dt * 0.5, 0);   // 中性缓慢衰减
     }
 
-    // 张手保持 0.6s 后进入苏醒流：每 0.55s 唤醒一只。
+    // 张手保持片刻后进入苏醒流，仍逐只唤醒并保留 20 只的群体规模。
     if (P1.gatherHold >= P1_TIMING.gatherHold) {
       P1.icon = null;
       P1.wakeTimer += dt;
@@ -1369,7 +1369,8 @@
     P3={beat:0,clock:0,beatClock:0,activeTime:0,collected:0,mixed:0,dust:[],rings:[],
       leader:{x:900,y:560},camera:{x:900,y:560},frameShift:{x:0,y:0},
       vortex:0,vortexRadius:150,turn:0,path:[],inputLast:null,inputSpeed:0,returnPeak:0,
-      split:0,splitReady:false,mergeHold:0,lastSide:0,sideAt:-10,splitAt:0,separated:false,
+      split:0,splitReady:false,mergeHold:0,lastSide:0,splitAt:0,separated:false,
+      splitAnchor:null,splitHold:0,dualHold:0,splitMode:'single',inputMissingFor:0,
       merging:false,mergeStyle:'gentle',fusion:null,prevSpacing:null,wasCentered:false,
       pulse:0,beatIndex:-1,rhythmHits:0,rhythm:null,grow:0,target:60,startCount:0,
       complete:false,completion:0,budget:[0,0,0],births:[],birthTimer:0,activeNest:-1,nurseryVisibility:1,
@@ -1518,7 +1519,11 @@
     herdHud.classList.remove('quiet');
     document.querySelector('.herd-chapter').textContent='03 / BLOOM';
     herdTitle.textContent=['','引流育光','颜色炼金','群体共振','繁光初成'][beat];
-    if(beat===2){P3.lastSide=0;P3.sideAt=-10;P3.returnPeak=0;}
+    if(beat===2){
+      P3.lastSide=0;P3.splitHold=0;P3.dualHold=0;P3.splitAnchor=null;
+      P3.splitMode='single';P3.returnPeak=0;P3.inputLast=null;P3.inputSpeed=0;
+      P3.prevSpacing=null;P3.wasCentered=false;
+    }
     if(beat===3){
       P3.rhythm={time:0,index:-1,phrase:0,responses:{},failed:0,assist:false,assistEdges:0,
         assistMask:0,confirmed:null,candidate:null,stable:0,lastEdge:-10,intro:2.4,cooldown:0};
@@ -1561,6 +1566,8 @@
   }
   function updateBloomInput(dt) {
     if(P3.beat===4 || dt<=0)return;
+    // 分群以进入这一拍后的掌心位置为起点，避免宽屏需要大幅横扫。
+    if(P3.beat===2&&!P3.splitAnchor)P3.splitAnchor={x:hand.cursor.x/W,y:hand.cursor.y/H};
     var b=bloomBounds(),wx=P3.camera.x+(hand.cursor.x-W/2)/p2Unit();
     var wy=P3.camera.y+(hand.cursor.y-H*.47)/p2Unit();
     wx=clamp(wx,900-b.x,900+b.x);wy=clamp(wy,560-b.y,560+b.y*.8);
@@ -1569,9 +1576,11 @@
       var speed=clamp(Math.hypot(wx-previous.x,wy-previous.y)/dt,0,1000);
       P3.inputSpeed+=(speed-P3.inputSpeed)*(1-Math.exp(-dt*8));
       P3.returnPeak*=Math.exp(-dt*1.2);
-      if(Math.abs(wx-900)<Math.abs(previous.x-900)-1)P3.returnPeak=Math.max(P3.returnPeak,P3.inputSpeed);
+      var home=P3.beat===2&&P3.splitAnchor?P3.splitAnchor.x:.5;
+      if(Math.abs(hand.cursor.x/W-home)<Math.abs(previous.sx-home)-.001)
+        P3.returnPeak=Math.max(P3.returnPeak,P3.inputSpeed);
     }
-    P3.inputLast={x:wx,y:wy};
+    P3.inputLast={x:wx,y:wy,sx:hand.cursor.x/W};
     P3.leader.x+=(wx-P3.leader.x)*(1-Math.exp(-dt*4));
     P3.leader.y+=(wy-P3.leader.y)*(1-Math.exp(-dt*4));
     var path=P3.path,prev=path[path.length-1];
@@ -1592,28 +1601,40 @@
     }
     if(P3.beat!==2 || P3.fusion)return;
     if(P3.merging){P3.split=Math.max(0,P3.split-dt*(P3.mergeStyle==='surge'?1.2:.45));return;}
-    var nx=hand.cursor.x/W-.5,side=Math.abs(nx)>.18?Math.sign(nx):0;
+    var shortSide=Math.min(W,H),offset=hand.cursor.x-P3.splitAnchor.x*W;
+    var side=Math.abs(offset)>shortSide*.13?Math.sign(offset):0;
     var second=hand.secondary && performance.now()/1000-hand.secondary.at<.3?hand.secondary:null;
     var spacing=second?Math.abs(second.x-hand.cursor.x)/W:0;
     if(second && P3.prevSpacing!=null && spacing<P3.prevSpacing){
       P3.returnPeak=Math.max(P3.returnPeak,clamp((P3.prevSpacing-spacing)*W/p2Unit()/dt*.5,0,900));
     }
     P3.prevSpacing=second?spacing:null;
-    var twoApart=second && spacing>.30;
-    if(twoApart || (side && P3.lastSide && side!==P3.lastSide && P3.clock-P3.sideAt<2.8)){
+    P3.dualHold=second&&spacing>.30?P3.dualHold+dt:0;
+    var twoApart=P3.dualHold>.18;
+    if(side){
+      P3.splitHold=side===P3.lastSide?P3.splitHold+dt:dt;
+      P3.lastSide=side;
+    }else{P3.splitHold=0;P3.lastSide=0;}
+    // 任意一侧的小幅位移并停留片刻即可锁定分群，无须限时横跨左右两端。
+    if(twoApart || P3.splitHold>.16){
       if(!P3.splitReady){P3.splitAt=P3.clock;P3.separated=false;P3.returnPeak=0;P3.arrivalStyle=null;}
       P3.splitReady=true;
+      if(twoApart)P3.splitMode='dual';
     }
-    if(side && side!==P3.lastSide){P3.lastSide=side;P3.sideAt=P3.clock;}
-    var together=(!second && Math.abs(nx)<.13) || (second && spacing<.2);
+    var together=second?spacing<.2:P3.splitMode==='dual'?
+      Math.abs(hand.cursor.x/W-.5)<.13:Math.abs(offset)<shortSide*.075;
     if(P3.splitReady){
       P3.split+=(1-P3.split)*(1-Math.exp(-dt*2.8));
       if(together && !P3.wasCentered)P3.arrivalStyle=P3.returnPeak>320?'surge':'gentle';
-      if(together && P3.separated && P3.clock-P3.splitAt>2.6)P3.mergeHold+=dt;else P3.mergeHold=0;
-      if(P3.mergeHold>.45){
+      if(together && P3.separated && P3.clock-P3.splitAt>.9)P3.mergeHold+=dt;else P3.mergeHold=0;
+      if(P3.mergeHold>.35){
         P3.mergeStyle=P3.arrivalStyle||'gentle';P3.splitReady=false;P3.lastSide=0;P3.mergeHold=0;P3.merging=true;
       }
-    }else P3.split=Math.max(0,P3.split-dt*.6);
+    }else{
+      // 完成手势前也给出轻微游开反馈，方便判断掌心移动已被识别。
+      var preview=clamp((Math.abs(offset)/shortSide-.035)/.095,0,1)*.24;
+      P3.split+=(preview-P3.split)*(1-Math.exp(-dt*5));
+    }
     P3.wasCentered=together;
   }
   function updateBloomSpirit(s,dt) {
@@ -1787,8 +1808,14 @@
       if(bloomExitRocks.age>=3.6)bloomExitRocks=null;
     }
     var active=dt>0&&hand.present&&bloomMix>.85,g=active?currentGesture():'Neutral';
-    if(active){P3.activeTime+=dt;updateBloomInput(dt);}
-    else{P3.path=[];P3.lastSide=0;P3.inputLast=null;P3.inputSpeed=0;P3.returnPeak=0;P3.mergeHold=0;P3.wasCentered=false;}
+    if(active){P3.inputMissingFor=0;P3.activeTime+=dt;updateBloomInput(dt);}
+    else{
+      P3.inputMissingFor+=dt;P3.path=[];P3.inputLast=null;P3.inputSpeed=0;P3.returnPeak=0;
+      // 短暂丢帧暂停输入，保留分群起点和已完成的游开；重新入镜后继续。
+      if(P3.inputMissingFor>.7){
+        P3.lastSide=0;P3.splitHold=0;P3.dualHold=0;P3.mergeHold=0;P3.wasCentered=false;
+      }
+    }
     P3.vortex=Math.max(0,P3.vortex-dt*.25);
     if(P3.beat===4){
       P3.leader.x+=(900-P3.leader.x)*(1-Math.exp(-dt*.6));
@@ -1841,9 +1868,10 @@
     }else if(P3.beat===2){
       cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，新的生命沿螺旋舒展':'新色正从相遇的地方，传向每一只光灵'):
         P3.merging?'让两群微光靠近，等待它们真正相遇':P3.splitReady?
-        (P3.separated?'回到中央让它们融合；慢回中或快回中，会有不同回应':'青蓝与金色正在游开，稍等它们形成双群'):
-        '单手左右移动分群，再回中合拢；双手也可分别牵引';
-      progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):'青蓝 × 金 → 青绿';
+        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'回到标记的起点合拢；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
+        '单手向任一侧移动一小段即可分群，再回到起点合拢；也可用双手';
+      progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):
+        P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'青蓝 × 金 → 青绿';
     }else if(P3.beat===3){
       var r=P3.rhythm,mature=P3.seeds.filter(function(s){return s.mature;}).length;
       cue=r.intro>0?'三枚种子等待回应：跟着光圈，展开、合拢、展开、合拢':
@@ -1853,7 +1881,7 @@
       progress='共振 '+mature+' / 3 · 光灵 '+spirits.length+' / '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
     if(bloomMix<.85)cue='海盆渐渐展开，青蓝与金色的光核正在苏醒';
-    else if(!active&&P3.beat!==4)cue='请将手掌放回画面，光核与种子会保留你的进度';
+    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度与起点标记会保留':'请将手掌放回画面，光核与种子会保留你的进度';
     herdCue.textContent=cue;herdProgress.textContent=progress;
     herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
   }
@@ -1962,6 +1990,14 @@
           p.vertex(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r*.75);
         }p.endShape();
       }
+    }
+    if(P3.beat===2&&P3.splitAnchor&&!P3.fusion&&!P3.merging){
+      var homeX=P3.splitAnchor.x*W,homeY=P3.splitAnchor.y*H,mark=Math.max(.65,u);
+      p.noFill();p.stroke(190,220,235,65*fade);p.strokeWeight(Math.max(.7,u));
+      p.circle(homeX,homeY,22*mark);
+      p.noStroke();p.fill(190,220,235,120*fade);p.textAlign(bloomP5.CENTER);
+      p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
+      p.text('起点',homeX,homeY+26*mark);
     }
     if(P3.beat===2&&P3.split>.1&&!P3.fusion&&P3.centers){
       P3.centers.forEach(function(c,i){
@@ -2546,9 +2582,9 @@
     // 手势检测（内部节流 ~15fps）
     detectHand(now);
 
-    // 手离开画面（真实时钟宽限 0.25s）：冻结状态而非误触发（方案 4.2），
-    // 光晕淡出；真实检测与合成注入共用此判定
-    if (hand.present && now / 1000 - hand.lastSeenAt > HAND_LOST_AFTER) {
+    // 分群时适当容忍双手模式的检测间隔；其他场景仍使用原有宽限。
+    var lostAfter=scene===SCENE.BLOOM&&P3.beat===2 ? .45 : HAND_LOST_AFTER;
+    if (hand.present && now / 1000 - hand.lastSeenAt > lostAfter) {
       hand.present = false;
       hand.pinch.active = false;
       hand.pinch.fired = false;
@@ -2675,6 +2711,8 @@
       nurseries:P3.nurseries.map(function(n){var q=bloomScreen(n.x,n.y);return {x:n.x,y:n.y,sx:q.x,sy:q.y,dust:n.dust,energy:n.energy,state:n.state,assist:n.assist};}),
       seeds:P3.seeds.map(function(s){return {mature:s.mature,progress:s.progress};}),
       separation:P3.separation||0,separated:P3.separated,mergeStyle:P3.mergeStyle,
+      splitReady:P3.splitReady,splitMode:P3.splitMode,splitHold:P3.splitHold,
+      splitAnchor:P3.splitAnchor&&{x:P3.splitAnchor.x,y:P3.splitAnchor.y},
       fusion:P3.fusion&&{style:P3.fusion.style,age:P3.fusion.age},
       rhythm:P3.rhythm&&{time:P3.rhythm.time,index:P3.rhythm.index,phrase:P3.rhythm.phrase,assist:P3.rhythm.assist,
         edges:P3.rhythm.assistEdges,failed:P3.rhythm.failed,intro:P3.rhythm.intro,cooldown:P3.rhythm.cooldown}};},
