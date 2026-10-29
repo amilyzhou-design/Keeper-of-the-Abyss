@@ -1172,7 +1172,7 @@
     if (!sh) {
       if(P2.shadowWarning){
         P2.shadowWarning.age+=dt;
-        if(P2.shadowWarning.age>=1.6){var pass=P2.shadowWarning.pass;P2.shadowWarning=null;spawnShadow(pass);}
+        if(P2.shadowWarning.age>=2.2){var pass=P2.shadowWarning.pass;P2.shadowWarning=null;spawnShadow(pass);}
       }else if(P2.beat===2&&P2.shadowCount<2&&P2.progress>=[.36,.62][P2.shadowCount]){
         P2.shadowWarning={age:0,pass:P2.shadowCount+1};P2.cueClock=0;
       }
@@ -1360,7 +1360,7 @@
     ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle='#f5cf8c';ctx.fillStyle='rgba(24,34,43,.8)';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(x,y-15);ctx.lineTo(x-14,y+12);ctx.lineTo(x+14,y+12);ctx.closePath();ctx.fill();ctx.stroke();
     ctx.fillStyle='#ffe2a6';ctx.font='bold 17px Microsoft YaHei';ctx.textAlign='center';ctx.fillText('!',x,y+7);
-    ctx.font='11px Microsoft YaHei';ctx.textAlign='right';ctx.fillText('掠影接近',x-23,y+4);ctx.restore();
+    ctx.restore();
   }
   function drawShadow() {
     var sh = P2.shadow; if (!sh) return;
@@ -1531,7 +1531,7 @@
     P3.leader={x:900+(ep.x-W/2)/u,y:560+(ep.y-H*.47)/u};
     P3.startCount=spirits.length;P3.target=Math.max(60,spirits.length*2);morphT=1;
     var growth=P3.target-P3.startCount;
-    P3.budget[0]=Math.round(growth*.6);P3.budget[1]=0;P3.feedGoal=Math.max(18,P3.budget[0]*2);
+    P3.budget[0]=Math.round(growth*.6);P3.budget[1]=0;P3.feedGoal=Math.max(24,P3.budget[0]*3);
     P3.budget[2]=growth-P3.budget[0]-P3.budget[1];
     spirits.forEach(function(s,i){
       s.wx=900+(s.x-W/2)/u;s.wy=560+(s.y-H*.47)/u;
@@ -1565,7 +1565,7 @@
     }
     if(beat===3){
       P3.rhythm={time:0,index:-1,phrase:0,responses:{},failed:0,assist:false,assistEdges:0,
-        assistMask:0,confirmed:null,candidate:null,stable:0,lastEdge:-10,intro:2.4,cooldown:0};
+        assistMask:0,confirmed:null,candidate:null,stable:0,lastEdge:-10,intro:1.2,cooldown:0,seedOpened:false};
       P3.gesture='Neutral';
     }
   }
@@ -1733,7 +1733,7 @@
           var pull=g==='Gather'?3.5:2.2;
           d.x+=(eater.wx-d.x)*pull*dt;d.y+=(eater.wy-d.y)*pull*dt;
           if(Math.hypot(eater.wx-d.x,eater.wy-d.y)<19&&P3.eatCooldown<=0){
-            P3.collected++;P3.eatCooldown=.22;eater.flash=.8;
+            P3.collected++;P3.eatCooldown=.24;eater.flash=.8;
             eater.sizeGoal=Math.min(1.45,(eater.sizeGoal||eater.size)+.035);
             var total=Math.floor(P3.collected*P3.budget[0]/P3.feedGoal),births=total-P3.feedBirths;
             if(births>0){queueBloomBirth(births,eater.wx,eater.wy,eater.group,eater.bloomColor||P3_PALETTE[0],'feeding');P3.feedBirths=total;}
@@ -1759,7 +1759,7 @@
   function matureBloomSeed() {
     var seed=P3.seeds.find(function(s){return !s.mature;});if(!seed)return;
     var index=P3.seeds.indexOf(seed),pos=bloomSeedPosition(index);
-    seed.mature=true;seed.age=0;seed.progress=1;P3.rhythm.cooldown=1.3;
+    seed.mature=true;seed.age=0;seed.progress=1;P3.rhythm.cooldown=.65;
     var count=Math.floor(P3.budget[2]/3)+(index<P3.budget[2]%3?1:0);
     queueBloomBirth(count,pos.x,pos.y,null,P3.mixedColor,'seed');
     bloomRing(pos.x,pos.y,P3.mixedColor,'seed');bloomSound('seed',index);P3.pulse=1;
@@ -1768,41 +1768,23 @@
     var r=P3.rhythm;if(!r)return;
     P3.seeds.forEach(function(s){if(s.mature)s.age+=dt;});
     if(!active){r.confirmed=null;r.candidate=null;r.stable=0;return;}
-    if(r.intro>0){r.intro=Math.max(0,r.intro-dt);r.confirmed=(g==='Gather'||g==='Disperse')?g:null;return;}
-    if(r.cooldown>0){r.cooldown=Math.max(0,r.cooldown-dt);r.confirmed=(g==='Gather'||g==='Disperse')?g:null;return;}
+    if(r.intro>0){r.intro=Math.max(0,r.intro-dt);r.candidate=null;r.stable=0;return;}
     r.time+=dt;
-    var recognized=g==='Gather'||g==='Disperse';
-    if(recognized){
-      if(g===r.candidate)r.stable+=dt;else{r.candidate=g;r.stable=0;}
-      if(r.stable>=.1){
-        if(r.confirmed==null)r.confirmed=g;
-        else if(g!==r.confirmed && r.time-r.lastEdge>.28){
-          r.confirmed=g;r.lastEdge=r.time;
-          var nearest=Math.round(r.time/.8),phrase=Math.floor(nearest/4);
-          var response=r.responses[phrase]||(r.responses[phrase]={hits:0,mask:0,attempts:0,beats:{}});
-          response.attempts++;
-          var expected=nearest%2===0?'Gather':'Disperse';
-          var aligned=Math.abs(r.time-nearest*.8)<(r.assist?.37:.23)&&g===expected;
-          if(aligned&&!response.beats[nearest]){
-            response.beats[nearest]=true;response.hits++;response.mask|=g==='Gather'?1:2;P3.rhythmHits++;
-          }
-          if(r.assist){r.assistEdges++;r.assistMask|=g==='Gather'?1:2;}
-          var current=P3.seeds.find(function(s){return !s.mature;});
-          if(current){current.pulse=.8;current.progress=Math.max(current.progress,Math.min(.85,(r.assist?r.assistEdges/4:response.hits/2)*.85));}
-          P3.pulse=.55;
-        }
-      }
-    }else{r.candidate=null;r.stable=0;}
     var index=Math.floor(r.time/.8);
     if(index!==r.index){r.index=index;P3.beatIndex=index;P3.pulse=.7;bloomTone();}
-    var phraseIndex=Math.floor(r.time/3.2),matured=false;
-    while(r.phrase<phraseIndex){
-      var result=r.responses[r.phrase];
-      if(result&&result.hits>=2&&result.mask===3){matureBloomSeed();matured=true;r.assistEdges=0;r.assistMask=0;}
-      else if(result&&result.attempts>0){r.failed++;if(r.failed>=2)r.assist=true;}
-      delete r.responses[r.phrase-1];r.phrase++;
+    if(r.cooldown>0){r.cooldown=Math.max(0,r.cooldown-dt);r.candidate=null;r.stable=0;return;}
+    // 每枚种子只需一次明确的张手、握拳；节拍仅作呼吸和声音引导。
+    if(g!=='Gather'&&g!=='Disperse'){r.candidate=null;r.stable=0;return;}
+    if(g===r.candidate)r.stable+=dt;else{r.candidate=g;r.stable=dt;}
+    if(r.stable<.12||g===r.confirmed)return;
+    r.confirmed=g;
+    var current=P3.seeds.find(function(s){return !s.mature;});if(!current)return;
+    if(g==='Gather'&&!r.seedOpened){
+      r.seedOpened=true;current.progress=.5;current.pulse=.8;P3.pulse=.7;P3.rhythmHits++;
+    }else if(g==='Disperse'&&r.seedOpened){
+      r.seedOpened=false;P3.rhythmHits++;matureBloomSeed();
+      r.candidate=null;r.stable=0;
     }
-    if(!matured&&r.assist&&r.assistEdges>=4&&r.assistMask===3){matureBloomSeed();r.assistEdges=0;r.assistMask=0;}
   }
   function updatePhase3(dt) {
     P3.clock+=dt;P3.beatClock+=dt;bloomMix=clamp(bloomMix+dt/5.5,0,1);
@@ -1885,10 +1867,9 @@
         P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'分群相遇 · 孕育共振种子';
     }else if(P3.beat===3){
       var r=P3.rhythm,mature=P3.seeds.filter(function(s){return s.mature;}).length;
-      cue=r.intro>0?'三枚种子等待回应：跟着光圈，展开、合拢、展开、合拢':
-        r.assist?'慢慢张开，再轻轻合拢；每次交替都在滋养种子':
+      cue=r.intro>0?'张开，再轻轻握拳；每次开合唤醒一枚种子':
         r.cooldown>0?'一枚种子舒展开了，新的光灵正在加入':
-        (Math.floor(r.time/.8)%2===0?'张开手掌，让光圈舒展':'轻轻握拳，让光圈收拢');
+        r.seedOpened?'轻轻握拳，让这枚种子成熟':'张开手掌，唤醒下一枚共振种子';
       progress='共振 '+mature+' / 3 · 光灵 '+spirits.length+' / '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
     if(bloomMix<.85)cue='海盆渐渐展开，带着光群游向飘落的光尘';
@@ -2296,6 +2277,30 @@
     }
     P4.rings.forEach(function(r){
       var q=ascensionScreen(r.x,r.y),t=r.age/2.8,color=r.color;
+      if(r.kind==='clap'){
+        var duration=1.8,life=clamp(r.age/duration,0,1),shortSide=Math.min(W,H);
+        var attack=clamp(r.age/.06,0,1),strength=attack*Math.pow(1-life,1.25)*fade;
+        if(strength<=.001)return;
+        var dc=p.drawingContext;dc.save();
+        drawSoftEmberGlow(dc,q.x,q.y,shortSide*(.17+life*.15),color,strength*.48);
+        dc.restore();
+        p.noFill();p.strokeWeight(Math.max(1.6,shortSide*.0025));
+        for(var echo=0;echo<3;echo++){
+          var elapsed=r.age-echo*.15;if(elapsed<0)continue;
+          var progress=clamp(elapsed/(duration-echo*.15),0,1);
+          var radius=shortSide*(.045+easeOutCubic(progress)*.4);
+          p.stroke(color[0],color[1],color[2],180*strength*(1-echo*.2));
+          p.ellipse(q.x,q.y,radius*2,radius*1.35);
+        }
+        for(var spark=0;spark<12;spark++){
+          var angle=spark/12*Math.PI*2+.12,travel=shortSide*(.06+easeOutCubic(life)*.32);
+          var x=q.x+Math.cos(angle)*travel,y=q.y+Math.sin(angle)*travel*.75;
+          p.stroke(color[0],color[1],color[2],150*strength);p.strokeWeight(Math.max(1.2,shortSide*.0018));
+          p.line(x,y,x-Math.cos(angle)*shortSide*.025*(1-life),y-Math.sin(angle)*shortSide*.018*(1-life));
+          p.noStroke();p.fill(255,250,232,220*strength);p.circle(x,y,Math.max(2,shortSide*.005)*(1-life*.6));
+        }
+        return;
+      }
       p.noFill();p.stroke(color[0],color[1],color[2],65*(1-t)*fade);p.strokeWeight(Math.max(.7,u));
       p.ellipse(q.x,q.y,(45+easeOutCubic(t)*180)*u,(20+easeOutCubic(t)*65)*u);
     });
@@ -2402,7 +2407,8 @@
     ascentMic.analyser.getFloatTimeDomainData(ascentMic.samples);
     if(detectClapTransient(ascentMic.samples,ascentMic,now)){
       ascentMic.feedbackUntil=now+1.5;
-      P4.rings.push({x:P4.nest.x,y:P4.nest.y,age:0,color:[255,243,214]});
+      P4.rings.push({x:P4.nest.x,y:P4.nest.y,age:0,color:[255,243,214],kind:'clap'});
+      if(P4.beat<=2)spirits.forEach(function(s){if(s.ascendWave==null)s.flash=Math.max(s.flash,.8);});
       if(P4.beat===3)P4.pendingClapUntil=now+2;
     }
     if(now<ascentMic.calibratedUntil)feedback.textContent='正在适应环境声，请稍等片刻';
