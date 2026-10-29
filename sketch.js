@@ -843,7 +843,7 @@
 
   function resetPhase2() {
     P2 = { beat: 0, beatClock: 0, scrollVX: 0, leaderVY: 0, distance: 0, travel: 0,
-      passedGaps: 0, dustBonus: 0, shadow: null, shadowCount: 0,
+      passedGaps: 0, dustBonus: 0, shadow: null, shadowCount: 0, shadowWarning:null,
       pinchHold: 0, prevPinch: false, lure: null, ballT: 0, contracting:false, burstDone: false, icon: null,
       camera: { x: 0, y: 0 }, frameShift: { x: 0, y: 0 }, leader: null,
       route: 0, routeLocked: false, routeChoice: -1, preview: false,
@@ -961,7 +961,7 @@
 
   function setHerdBeat(beat) {
     P2.beat = beat; P2.beatClock = 0; P2.cueClock = 0;
-    if(beat===4){P2.exitAge=0;P2.exitSlide=Math.max(0,p2Screen(4800,0).x/p2Unit())+100;}
+    if(beat===4){P2.shadowWarning=null;P2.exitAge=0;P2.exitSlide=Math.max(0,p2Screen(4800,0).x/p2Unit())+100;}
     if (herdTitle) herdTitle.textContent = beat === 2 ? (P2.route ? "采尘深径" : "回澜长廊") : beat === 4 ? "微光仍在" : beat === 1 ? "选择航道" : "放牧";
     if (herdCue) herdCue.textContent = beat === 4 ? "光群穿过了海沟，你守住了这片微光" : "手放上半屏选宽缝，下半屏选窄缝；移向右侧启程";
     if (herdHud) herdHud.dataset.beat = String(beat);
@@ -1146,7 +1146,7 @@
   }
 
   function spawnShadow(pass) {
-    var x = P2.leader.x + W / p2Unit() * .55 + 240;
+    var x = P2.camera.x + W / p2Unit() * .56 + 100;
     P2.shadow = { wx: x, wy: p2RouteAt(x).y, wrx: 360, wry: 180,
       x: 0, y: 0, rx: 0, ry: 0, state: "sweep", pass: pass, age: 0, lingerT: 0, fade: 1 };
     P2.burstDone = false; P2.prevPinch = false; P2.pinchHold = 0; P2.cueClock = 0;
@@ -1170,7 +1170,12 @@
       if (l.life <= 0) P2.lure = null;
     }
     if (!sh) {
-      if (P2.beat === 2 && P2.shadowCount < 2 && P2.progress >= [ .18, .56 ][P2.shadowCount]) spawnShadow(P2.shadowCount + 1);
+      if(P2.shadowWarning){
+        P2.shadowWarning.age+=dt;
+        if(P2.shadowWarning.age>=1.6){var pass=P2.shadowWarning.pass;P2.shadowWarning=null;spawnShadow(pass);}
+      }else if(P2.beat===2&&P2.shadowCount<2&&P2.progress>=[.36,.62][P2.shadowCount]){
+        P2.shadowWarning={age:0,pass:P2.shadowCount+1};P2.cueClock=0;
+      }
       projectP2Encounter(); return;
     }
     sh.age += dt;
@@ -1199,10 +1204,10 @@
     } else {
       var near = sh.wx < P2.leader.x + 360 && sh.wx > P2.leader.x - 200;
       if (sh.pass === 2 && near && sh.lingerT < 2.8) { sh.lingerT += dt; sh.wx += P2.scrollVX * dt * .85; }
-      else sh.wx -= 250 * dt;
+      else sh.wx -= 150 * dt;
       sh.wy += (p2RouteAt(sh.wx).y + (P2.leader.y - p2RouteAt(P2.leader.x).y) * .35 - sh.wy) * Math.min(dt * 2, 1);
     }
-    if (sh.wx < P2.leader.x - W / p2Unit() * .6 - sh.wrx || sh.fade <= 0 || sh.age > 17) {
+    if (sh.wx + sh.wrx < P2.leader.x - 180 || sh.fade <= 0 || sh.age > 28) {
       P2.shadow = null; P2.shadowCount++; P2.icon = null; P2.pinchHold = 0; P2.prevPinch = false; P2.cueClock = 0;
     }
     projectP2Encounter();
@@ -1302,7 +1307,7 @@
     P2.dustFx = P2.dustFx.filter(function (fx) { return fx.age < fx.life; });
     if (herdProgress) herdProgress.textContent = (P2.route ? "窄缝 " : "宽缝 ") + Math.round(P2.progress * 100) + "% · 光尘 " + P2.dustBonus;
     if (P2.beat >= 1 && P2.beat <= 2 && herdCue) {
-      herdCue.textContent = !active ? "请将手掌放回画面，旅程会在原处继续" : P2.shadow ?
+      herdCue.textContent = !active ? "请将手掌放回画面，旅程会在原处继续" : P2.shadowWarning ? "右侧有掠影接近，准备握拳护住光群" : P2.shadow ?
         (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.contracting ?
           (P2.shadow.pass===2&&P2.pinchHold>=1?"光群已聚拢，张手释放诱饵":"光灵正向火种聚拢，保持握拳护住它们"):
           P2.shadow.pass === 2 ? "黑影徘徊：握拳蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，握拳让光灵聚向火种") :
@@ -1348,6 +1353,15 @@
     });
     ctx.restore();
   }
+  function drawPredatorWarning() {
+    if(scene!==SCENE.HERD||!P2.shadowWarning)return;
+    var warning=P2.shadowWarning,alpha=.35+.65*Math.pow(Math.sin(warning.age*Math.PI*3),2);
+    var x=W-26,y=clamp(ember.y||H*.47,H*.25,H*.72);
+    ctx.save();ctx.globalAlpha=alpha;ctx.strokeStyle='#f5cf8c';ctx.fillStyle='rgba(24,34,43,.8)';ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(x,y-15);ctx.lineTo(x-14,y+12);ctx.lineTo(x+14,y+12);ctx.closePath();ctx.fill();ctx.stroke();
+    ctx.fillStyle='#ffe2a6';ctx.font='bold 17px Microsoft YaHei';ctx.textAlign='center';ctx.fillText('!',x,y+7);
+    ctx.font='11px Microsoft YaHei';ctx.textAlign='right';ctx.fillText('掠影接近',x-23,y+4);ctx.restore();
+  }
   function drawShadow() {
     var sh = P2.shadow; if (!sh) return;
     ctx.save(); ctx.globalAlpha = sh.fade; ctx.translate(sh.x, sh.y); ctx.scale(1, sh.ry / sh.rx);
@@ -1377,7 +1391,7 @@
 
 
   /* ============================================
-     阶段三 · 繁衍 v5：两核培育 → 双群炼色 → 三枚共振种子。
+     阶段三 · 繁衍 v6：光尘进食 → 双群共鸣 → 三枚共振种子。
      p5 实例负责光尘、漩涡流线、脉冲涟漪；既有 Canvas 保留光灵视觉。
      只有主 tick 推进模拟，p5.noLoop 避免双重动画时钟。
      ============================================ */
@@ -1402,10 +1416,8 @@
       merging:false,mergeStyle:'gentle',fusion:null,prevSpacing:null,wasCentered:false,
       pulse:0,beatIndex:-1,rhythmHits:0,rhythm:null,grow:0,target:60,startCount:0,
       complete:false,completion:0,budget:[0,0,0],births:[],birthTimer:0,activeNest:-1,nurseryVisibility:1,
-      nurseries:[{x:680,y:535,color:P3_PALETTE[0].slice()},{x:1120,y:605,color:P3_PALETTE[2].slice()}],
+      feedGoal:0,feedBirths:0,eatCooldown:0,nurseries:[],
       seeds:[{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0}]};
-    P3.nurseries.forEach(function(n){Object.assign(n,{dust:0,energy:0,state:'sleeping',pulse:0,
-      hatchAge:0,cooldown:0,nearTime:0,openHold:0,assist:false,visualEnergy:0,visualPulse:0});});
     bloomMix=0;bloomBackdrop=null;bloomExitRocks=null;
     var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
   }
@@ -1498,12 +1510,9 @@
     return {x:Math.min(670,W/p2Unit()*.42),y:Math.min(390,H/p2Unit()*.34)};
   }
   function seedBloomDust(topOnly,edible) {
-    var b=bloomBounds();if(edible==null)edible=Math.random()<.55;
-    var eligible=P3.nurseries.filter(function(n){return n.state!=='hatched'&&n.state!=='contract';});
-    var n=eligible.length?eligible[Math.floor(Math.random()*eligible.length)]:null;
-    var x=900+rand(-b.x,b.x),y=topOnly?560-b.y-25:560+rand(-b.y,b.y);
-    if(edible&&n){x=n.x+rand(-105,105);y=n.y-rand(90,200);}
-    return {x:x,y:y,vx:rand(-5,5),vy:rand(12,22),phase:rand(0,Math.PI*2),size:rand(.8,2),edible:edible};
+    var b=bloomBounds();if(edible==null)edible=Math.random()<.65;
+    var x=900+rand(-b.x*.9,b.x*.9),y=topOnly?560-b.y-20:560+rand(-b.y*.85,b.y*.8);
+    return {x:x,y:y,vx:rand(-5,5),vy:rand(8,17),phase:rand(0,Math.PI*2),size:edible?rand(1.4,2.3):rand(.7,1.2),edible:edible};
   }
 
   function enterBloom() {
@@ -1522,7 +1531,7 @@
     P3.leader={x:900+(ep.x-W/2)/u,y:560+(ep.y-H*.47)/u};
     P3.startCount=spirits.length;P3.target=Math.max(60,spirits.length*2);morphT=1;
     var growth=P3.target-P3.startCount;
-    P3.budget[0]=Math.round(growth*.35);P3.budget[1]=Math.round(growth*.30);
+    P3.budget[0]=Math.round(growth*.6);P3.budget[1]=0;P3.feedGoal=Math.max(18,P3.budget[0]*2);
     P3.budget[2]=growth-P3.budget[0]-P3.budget[1];
     spirits.forEach(function(s,i){
       s.wx=900+(s.x-W/2)/u;s.wy=560+(s.y-H*.47)/u;
@@ -1548,7 +1557,7 @@
     herdHud.hidden=false;herdHud.dataset.phase='3';herdHud.dataset.beat=String(beat);
     herdHud.classList.remove('quiet');
     document.querySelector('.herd-chapter').textContent='03 / BLOOM';
-    herdTitle.textContent=['','引流育光','颜色炼金','群体共振','繁光初成'][beat];
+    herdTitle.textContent=['','引光进食','双群共鸣','群体共振','繁光初成'][beat];
     if(beat===2){
       P3.lastSide=0;P3.splitHold=0;P3.dualHold=0;P3.splitAnchor=null;
       P3.splitMode='single';P3.returnPeak=0;P3.inputLast=null;P3.inputSpeed=0;
@@ -1708,72 +1717,38 @@
     var breathTarget=(s.group?.95:1.5)+Math.sin(s.wanderPh)*.12;
     s.breatheSpd+=(breathTarget-s.breatheSpd)*Math.min(1,dt*.5);
     var groupColor=s.group?P3_PALETTE[2]:P3_PALETTE[0],color=groupColor;
-    if(P3.beat===1)color=mixRgb(P3_PALETTE[0],groupColor,clamp(P3.nurseries[s.group].dust/6,0,1));
-    if(P3.fusion){
-      var lag=Math.hypot(s.wx-P3.fusion.x,s.wy-P3.fusion.y)/280*.55;
-      var spread=clamp((P3.fusion.age-lag)/1.5,0,1);
-      color=mixRgb(groupColor,P3.mixedColor,spread);
-    }
-    if(P3.beat>=3){
-      var late=clamp(P3.seeds.filter(function(seed){return seed.mature;}).length/3,0,1);
-      color=mixRgb(P3.mixedColor,s.colorIndex===1?P3_PALETTE[1]:s.colorIndex===2?P3_PALETTE[2]:s.colorIndex===0?P3_PALETTE[0]:P3.mixedColor,late*.72);
-    }
     s.bloomColor=mixRgb(s.bloomColor,color,Math.min(1,dt*1.5));
     s.bright+=( (s.group?.92:1.03)-s.bright)*Math.min(1,dt*.08);
     projectBloomSpirit(s);
   }
-  function updateBloomNurseries(dt,active,g) {
-    var nearest=-1,distance=Infinity;
-    P3.nurseries.forEach(function(n,i){
-      var d=Math.hypot(P3.leader.x-n.x,P3.leader.y-n.y);
-      if(n.state!=='hatched'&&d<distance){distance=d;nearest=i;}
-      n.pulse=Math.max(0,n.pulse-dt*1.8);n.cooldown=Math.max(0,n.cooldown-dt);
-      n.visualEnergy+=(n.energy-n.visualEnergy)*(1-Math.exp(-dt*2.8));
-      n.visualPulse+=(n.pulse-n.visualPulse)*(1-Math.exp(-dt*5));
-      if(active&&d<165&&n.state!=='hatched'){
-        n.nearTime+=dt;
-        n.openHold=g==='Gather'?n.openHold+dt:0;
-        if(n.nearTime>5&&P3.vortex<.2)n.assist=true;
-      }else n.openHold=0;
-      if(active && n.state==='contract'){
-        n.hatchAge+=dt;
-        if(n.hatchAge>.9){
-          n.state='hatched';n.pulse=1;
-          var count=i===0?Math.ceil(P3.budget[0]/2):Math.floor(P3.budget[0]/2);
-          queueBloomBirth(count,n.x,n.y,i,n.color,'nursery');
-          bloomRing(n.x,n.y,n.color,'hatch');bloomSound('hatch',i);
-        }
-      }
-      if(n.state==='hatched')n.hatchAge=Math.min(3,n.hatchAge+dt);
-    });
-    P3.activeNest=nearest>=0&&distance<165?nearest:-1;
-  }
+
   function updateBloomDust(dt,active,g) {
-    var b=bloomBounds(),n=P3.activeNest>=0?P3.nurseries[P3.activeNest]:null;
-    var flow=n&&active&&n.state!=='contract'&&n.state!=='hatched'?
-      Math.max(P3.vortex,n.assist&&n.openHold>.65?.4:0):0;
-    if(hand.pinch.active)flow*=.3;
+    var b=bloomBounds();P3.eatCooldown=Math.max(0,P3.eatCooldown-dt);
     P3.dust.forEach(function(d){
       d.x+=(d.vx+Math.sin(P3.clock+d.phase)*5)*dt;d.y+=d.vy*dt;
-      d.flash=Math.max(0,(d.flash||0)-dt*3);
-      if(P3.beat===1 && d.edible && flow>.05){
-        var dx=n.x-d.x,dy=n.y-d.y,dist=Math.hypot(dx,dy);
-        if(dist<P3.vortexRadius+130){
-          d.x+=(dx*2.1-dy*.4*(P3.turn||1))*flow*dt;
-          d.y+=(dy*2.1+dx*.4*(P3.turn||1))*flow*dt;
-        }
-        if(Math.hypot(n.x-d.x,n.y-d.y)<28 && n.cooldown<=0 && n.dust<6){
-          n.dust++;n.energy=n.dust/2;n.state=n.dust===6?'contract':'charging';
-          n.pulse=.8;n.cooldown=.75;P3.collected++;bloomSound('dust',n.dust);
-          Object.assign(d,seedBloomDust(true,true));
+      if(active&&d.edible&&P3.collected<P3.feedGoal){
+        var eater=null,nearest=110;
+        spirits.forEach(function(body){var distance=Math.hypot(body.wx-d.x,body.wy-d.y);if(distance<nearest){nearest=distance;eater=body;}});
+        if(eater){
+          var pull=g==='Gather'?3.5:2.2;
+          d.x+=(eater.wx-d.x)*pull*dt;d.y+=(eater.wy-d.y)*pull*dt;
+          if(Math.hypot(eater.wx-d.x,eater.wy-d.y)<19&&P3.eatCooldown<=0){
+            P3.collected++;P3.eatCooldown=.22;eater.flash=.8;
+            eater.sizeGoal=Math.min(1.45,(eater.sizeGoal||eater.size)+.035);
+            var total=Math.floor(P3.collected*P3.budget[0]/P3.feedGoal),births=total-P3.feedBirths;
+            if(births>0){queueBloomBirth(births,eater.wx,eater.wy,eater.group,eater.bloomColor||P3_PALETTE[0],'feeding');P3.feedBirths=total;}
+            bloomRing(eater.wx,eater.wy,eater.bloomColor,'feeding');bloomSound('dust',P3.collected);
+            Object.assign(d,seedBloomDust(true,true));
+          }
         }
       }
-      if(d.y>560+b.y+35 || d.x<900-b.x-100 || d.x>900+b.x+100)Object.assign(d,seedBloomDust(true,d.edible));
+      if(d.y>560+b.y+35||d.x<900-b.x-50||d.x>900+b.x+50)Object.assign(d,seedBloomDust(true,d.edible));
     });
   }
+
   function beginBloomFusion(centers) {
     P3.mixed=1;P3.merging=false;P3.splitReady=false;
-    P3.mixedColor=bloomAddColor(P3_PALETTE[0],P3_PALETTE[2]);
+    P3.mixedColor=[191,217,232]; // 共振光色，不再改变光灵体色。
     P3.fusion={x:(centers[0].x+centers[1].x)/2,y:(centers[0].y+centers[1].y)/2,
       style:P3.mergeStyle,age:0,queued:false};
     P3.pulse=.8;bloomSound('fusion',0);
@@ -1856,7 +1831,7 @@
     var tx=900+(P3.leader.x-900)*.22*follow,ty=560+(P3.leader.y-560)*.17*follow;
     P3.camera.x+=(tx-P3.camera.x)*(1-Math.exp(-dt*.8));P3.camera.y+=(ty-P3.camera.y)*(1-Math.exp(-dt*.8));
     P3.frameShift={x:(oldX-P3.camera.x)*p2Unit(),y:(oldY-P3.camera.y)*p2Unit()};
-    if(P3.beat===1)updateBloomNurseries(dt,active,g);
+
     updateBloomDust(dt,P3.beat===1&&active,g);
     spirits.forEach(function(s){updateBloomSpirit(s,dt);});
     var centers=bloomCentroids(),separation=Math.hypot(centers[0].x-centers[1].x,centers[0].y-centers[1].y);
@@ -1878,7 +1853,7 @@
     }
     if(P3.beat===3)updateBloomRhythm(dt,active,g);
     updateBloomBirths(dt,active);
-    if(active&&P3.beat===1&&P3.nurseries.every(function(n){return n.state==='hatched';})&&!P3.births.length)setBloomBeat(2);
+    if(active&&P3.beat===1&&P3.collected>=P3.feedGoal&&!P3.births.length)setBloomBeat(2);
     if(P3.beat===3&&P3.seeds.every(function(s){return s.mature;})&&!P3.births.length&&spirits.length>=P3.target){
       P3.complete=true;setBloomBeat(4);P3.pulse=1;
     }
@@ -1899,18 +1874,15 @@
   function updateBloomHud(active) {
     var cue='',progress='';
     if(P3.beat===1){
-      var n=P3.activeNest>=0?P3.nurseries[P3.activeNest]:null;
-      cue=n?(n.state==='contract'?'微光正在苏醒，稍等它舒展尾鳍':
-        n.assist?'在光核旁张开手掌，也能引来缓慢的尘流':'在这枚光核旁缓缓画圈，让光尘流进内芯'):
-        '靠近青蓝或金色光核，缓缓画圈滋养它';
-      progress='青蓝 '+Math.min(3,P3.nurseries[0].energy).toFixed(1)+' / 3 · 金 '+Math.min(3,P3.nurseries[1].energy).toFixed(1)+' / 3';
+      cue='带着光群游向光尘，靠近进食；张开手掌可加快吸收';
+      progress='进食 '+P3.collected+' / '+P3.feedGoal+' · 光灵 '+spirits.length+' / '+P3.target;
     }else if(P3.beat===2){
-      cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，新的生命沿螺旋舒展':'新色正从相遇的地方，传向每一只光灵'):
+      cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，共振种子沿螺旋舒展':'两群微光相遇，共振种子正在诞生'):
         P3.merging?'让两群微光靠近，等待它们真正相遇':P3.splitReady?
         (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'回到标记的起点合拢；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
         '单手向任一侧移动一小段即可分群，再回到起点合拢；也可用双手';
       progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):
-        P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'青蓝 × 金 → 青绿';
+        P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'分群相遇 · 孕育共振种子';
     }else if(P3.beat===3){
       var r=P3.rhythm,mature=P3.seeds.filter(function(s){return s.mature;}).length;
       cue=r.intro>0?'三枚种子等待回应：跟着光圈，展开、合拢、展开、合拢':
@@ -1919,8 +1891,8 @@
         (Math.floor(r.time/.8)%2===0?'张开手掌，让光圈舒展':'轻轻握拳，让光圈收拢');
       progress='共振 '+mature+' / 3 · 光灵 '+spirits.length+' / '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
-    if(bloomMix<.85)cue='海盆渐渐展开，青蓝与金色的光核正在苏醒';
-    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度与起点标记会保留':'请将手掌放回画面，光核与种子会保留你的进度';
+    if(bloomMix<.85)cue='海盆渐渐展开，带着光群游向飘落的光尘';
+    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度与起点标记会保留':'请将手掌放回画面，进食与种子进度会保留';
     herdCue.textContent=cue;herdProgress.textContent=progress;
     herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
   }
@@ -1937,11 +1909,6 @@
       ctx.save();ctx.globalAlpha=alpha[i];if(i===1)ctx.filter='brightness(1.08)';
       ctx.drawImage(P3Art.images[key],W/2-w/2+dx,H/2-h/2+dy,w,h);ctx.restore();
     });
-    if(P3.mixedColor){
-      var c=P3.mixedColor,glow=ctx.createRadialGradient(W*.5,H*.86,0,W*.5,H*.86,Math.max(W,H)*.6);
-      glow.addColorStop(0,rgbaStr(c,.045));glow.addColorStop(1,rgbaStr(c,0));
-      ctx.save();ctx.globalCompositeOperation='lighter';ctx.fillStyle=glow;ctx.fillRect(0,0,W,H);ctx.restore();
-    }
     if(bloomBackdrop){ctx.save();ctx.globalAlpha=1-t;ctx.drawImage(bloomBackdrop,0,0,W,H);ctx.restore();}
     if(bloomExitRocks){
       var exit=bloomExitRocks,shift=-exit.slide*u*(easeInOutCubic(clamp(exit.age/3.6,0,1))-exit.from);
@@ -1955,46 +1922,7 @@
       p.circle(x,y,r*layer);
     }
   }
-  function drawBloomNursery(p,n,index,fade,u) {
-    var pos=bloomScreen(n.x,n.y),ghost=P3.beat>1;
-    var time=P3.clock+index*2.7,energy=n.visualEnergy,pulse=n.visualPulse;
-    var breath=.92+.08*Math.sin(time*1.1);
-    var contract=n.state==='contract'?easeInOutCubic(clamp(n.hatchAge/.9,0,1)):
-      n.state==='hatched'?1-easeOutCubic(clamp((n.hatchAge-.9)/.6,0,1)):0;
-    var opened=n.state==='hatched'?easeInOutCubic(clamp((n.hatchAge-.9)/1.5,0,1)):0;
-    var alpha=fade*P3.nurseryVisibility*(1-opened*.78)*(P3.beat===4?1-P3.completion:1);
-    var radius=(54+energy*6+pulse*5)*u*breath*(1-contract*.2+opened*.25);
-    // 轻微浮动、连续柔光和温白灯芯沿用掌心火种的视觉节奏。
-    pos.x+=Math.sin(time*.43)*2.5*u;pos.y+=Math.sin(time*.6)*3*u;
-    var dc=p.drawingContext;dc.save();dc.globalCompositeOperation='lighter';
-    drawSoftEmberGlow(dc,pos.x,pos.y,radius*1.55,n.color,alpha*(.24+energy*.035+pulse*.08));
-    var warm=mixRgb(n.color,[255,243,214],.65);
-    drawSoftEmberGlow(dc,pos.x,pos.y,radius*.53,warm,alpha*(.38+energy*.055));
-    var core=(4.5+energy*.7)*u*breath*(1-contract*.3);
-    dc.fillStyle=rgbaStr([255,248,231],alpha*.93);
-    dc.beginPath();dc.arc(pos.x,pos.y,core,0,Math.PI*2);dc.fill();
-    // 火星从光晕内缓缓升起，生命周期两端透明，不产生突然闪现。
-    if(!ghost)for(var k=0;k<5;k++){
-      var life=(time*(.18+k*.013)+k*.217)%1;
-      var sx=pos.x+(Math.sin(k*8.3)*15+Math.sin(time*.7+k)*4)*u;
-      var sy=pos.y+(10-life*55)*u;
-      drawSoftEmberGlow(dc,sx,sy,3.5*u,warm,Math.sin(life*Math.PI)*alpha*.35);
-    }
-    dc.restore();
-    if(!ghost){
-      // 三颗低亮度能量点保留进度提示，替代持续旋转的分段圆弧。
-      p.noStroke();
-      for(var k=0;k<3;k++){
-        var charged=clamp(energy-k,0,1);
-        p.fill(n.color[0],n.color[1],n.color[2],(35+charged*145)*alpha);
-        p.circle(pos.x+(k-1)*10*u,pos.y+39*u,(2.7+charged)*u);
-      }
-      p.textAlign(bloomP5.CENTER);p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
-      p.fill(n.color[0],n.color[1],n.color[2],180*alpha);
-      var label=n.state==='hatched'?'新生':n.state==='contract'?'苏醒中':(index?'金色光核':'青蓝光核');
-      p.text(label,pos.x,pos.y+52*u+12*Math.max(.65,u));
-    }
-  }
+
   function drawBloomEffects() {
     if(scene!==SCENE.BLOOM || !bloomP5)return;
     var scale=Math.min(1,1100/Math.max(W,H)),fw=Math.max(1,Math.round(W*scale)),fh=Math.max(1,Math.round(H*scale));
@@ -2009,16 +1937,8 @@
       p.noStroke();p.fill(255,243,214,12*a);p.circle(s.x,s.y,r*7);
       p.fill(d.edible?255:156, d.edible?243:192,d.edible?214:215,155*a);p.circle(s.x,s.y,r*1.5);
     });
-    P3.nurseries.forEach(function(n,i){drawBloomNursery(p,n,i,fade,u);});
+
     var center=bloomScreen(P3.leader.x,P3.leader.y);
-    if(P3.beat===1&&P3.activeNest>=0){
-      var n=P3.nurseries[P3.activeNest],q=bloomScreen(n.x,n.y);
-      var strength=Math.max(P3.vortex,n.assist&&n.openHold>.65?.28:0);
-      if(strength>.02){
-        p.noFill();p.stroke(n.color[0],n.color[1],n.color[2],35*strength*fade);p.strokeWeight(Math.max(.6,u));
-        p.bezier(center.x,center.y,center.x+35*u,center.y-60*u,q.x-35*u,q.y+50*u,q.x,q.y);
-      }
-    }
     if(P3.beat===1&&P3.vortex>.02){
       p.noFill();p.strokeWeight(Math.max(.6,u));
       for(var k=0;k<4;k++){
@@ -2280,7 +2200,7 @@
     P4.rings.forEach(function(r){r.age+=dt;});P4.rings=P4.rings.filter(function(r){return r.age<2.8;});
     if(P4.beat===2&&P4.waves===4&&spirits.every(function(s){return s.ascended;}))setAscensionBeat(3);
     sampleAscensionMic();
-    if(P4.beat===3&&P4.clap&&P4.beatClock>1)finishAscension('clap');
+    if(P4.beat===3&&P4.pendingClapUntil>performance.now()/1000&&P4.beatClock>.3)finishAscension('clap');
     P4.clap=false;
     if(P4.beat===4){
       P4.surface=easeInOutCubic(clamp((P4.beatClock-.8)/4,0,1));
@@ -2302,7 +2222,7 @@
       progress='终光 '+Math.round(clamp(P4.finalHold/2,0,1)*100)+'%';
     }
     if(P4.blend<.85)cue='海水渐亮，岩层正在身后退开…';
-    else if(!active&&!(P4.beat===2&&P4.waves===4))cue='请将手掌放回画面，已经送出的微光会继续上升';
+    else if(!active&&!(P4.beat===2&&P4.waves===4)&&!(P4.beat===3&&ascentMic.status==='ready'))cue='请将手掌放回画面，已经送出的微光会继续上升';
     herdCue.textContent=cue;herdProgress.textContent=progress;
   }
 
@@ -2423,11 +2343,16 @@
     if(ascentMic.context)ascentMic.context.close().catch(function(){});
     ascentMic.stream=null;ascentMic.context=null;ascentMic.source=null;ascentMic.analyser=null;ascentMic.samples=null;
     ascentMic.status='off';ascentMic.noise=.015;ascentMic.previous=0;
+    ascentMic.lastClap=-10;ascentMic.previousPeak=0;ascentMic.calibratedUntil=0;
+    document.getElementById('mic-feedback').hidden=true;
     var button=document.getElementById('ascension-mic');button.textContent='启用拍手终闪';button.setAttribute('aria-pressed','false');
   }
   async function enableAscensionMic() {
     if(scene!==SCENE.ASCEND||P4.beat===4||ascentMic.status==='loading')return;
-    if(ascentMic.status==='ready'){stopAscensionMic();return;}
+    if(ascentMic.status==='ready'){
+      if(ascentMic.context.state!=='running'){await ascentMic.context.resume();return;}
+      stopAscensionMic();return;
+    }
     var token=++ascentMic.token,button=document.getElementById('ascension-mic');
     ascentMic.status='loading';button.textContent='正在启用拍手…';
     var audioContext=null,stream=null;
@@ -2439,31 +2364,50 @@
       if(token!==ascentMic.token||scene!==SCENE.ASCEND||P4.beat===4){
         stream.getTracks().forEach(function(track){track.stop();});await audioContext.close();return;
       }
-      var analyser=audioContext.createAnalyser();analyser.fftSize=1024;
+      await audioContext.resume();
+      var analyser=audioContext.createAnalyser();analyser.fftSize=8192;
       var source=audioContext.createMediaStreamSource(stream);source.connect(analyser);
       ascentMic.stream=stream;ascentMic.context=audioContext;ascentMic.source=source;
       ascentMic.analyser=analyser;ascentMic.samples=new Float32Array(analyser.fftSize);
       ascentMic.status='ready';button.textContent='拍手终闪：开';button.setAttribute('aria-pressed','true');
+      ascentMic.noise=.005;ascentMic.previous=0;ascentMic.previousPeak=0;ascentMic.lastClap=-10;
+      ascentMic.calibratedUntil=performance.now()/1000+.65;ascentMic.feedbackUntil=0;
+      document.getElementById('mic-feedback').hidden=false;
     }catch(error){
       if(stream)stream.getTracks().forEach(function(track){track.stop();});
       if(audioContext)audioContext.close().catch(function(){});
       if(token===ascentMic.token){ascentMic.status='error';button.textContent='拍手未开启 · 可重试';}
     }
   }
+  function detectClapTransient(samples,state,now) {
+    var sum=0,peak=0;
+    for(var i=0;i<samples.length;i++){
+      var value=samples[i];sum+=value*value;peak=Math.max(peak,Math.abs(value));
+    }
+    var rms=Math.sqrt(sum/samples.length),calibrating=now<state.calibratedUntil;
+    var candidate=peak>Math.max(.10,state.noise*5)&&rms>Math.max(.008,state.noise*1.8);
+    var rising=peak>state.previousPeak*1.22||rms-state.previous>.004;
+    var detected=!calibrating&&candidate&&rising&&now-state.lastClap>1.3;
+    if(calibrating||!candidate)state.noise=lerp(state.noise,rms,calibrating?.15:.035);
+    state.noise=clamp(state.noise,.002,.09);state.previous=rms;state.previousPeak=peak;
+    state.level=peak;if(detected)state.lastClap=now;
+    return detected;
+  }
   function sampleAscensionMic() {
     if(ascentMic.status!=='ready'||!ascentMic.analyser)return;
+    var feedback=document.getElementById('mic-feedback'),now=performance.now()/1000;
+    if(ascentMic.context.state!=='running'){
+      feedback.textContent='麦克风暂停，点击下方按钮恢复';return;
+    }
     ascentMic.analyser.getFloatTimeDomainData(ascentMic.samples);
-    var sum=0,peak=0;
-    for(var i=0;i<ascentMic.samples.length;i++){
-      var value=ascentMic.samples[i];sum+=value*value;peak=Math.max(peak,Math.abs(value));
+    if(detectClapTransient(ascentMic.samples,ascentMic,now)){
+      ascentMic.feedbackUntil=now+1.5;
+      P4.rings.push({x:P4.nest.x,y:P4.nest.y,age:0,color:[255,243,214]});
+      if(P4.beat===3)P4.pendingClapUntil=now+2;
     }
-    var rms=Math.sqrt(sum/ascentMic.samples.length),now=performance.now()/1000;
-    var transient=rms>Math.max(.075,ascentMic.noise*3.8)&&peak>.30&&rms-ascentMic.previous>.03;
-    if(transient&&now-ascentMic.lastClap>1.8){
-      ascentMic.lastClap=now;if(P4.beat===3&&P4.beatClock>1)P4.clap=true;
-    }
-    if(rms<ascentMic.noise*2)ascentMic.noise=lerp(ascentMic.noise,rms,.025);
-    ascentMic.noise=clamp(ascentMic.noise,.008,.07);ascentMic.previous=rms;
+    if(now<ascentMic.calibratedUntil)feedback.textContent='正在适应环境声，请稍等片刻';
+    else if(now<ascentMic.feedbackUntil)feedback.textContent=P4.beat===3?'已识别拍手，正在点亮海面':'已识别拍手 · 完成四波升腾后可触发终闪';
+    else feedback.textContent='音量 '+Math.round(Math.min(1,ascentMic.level)*100)+'% · '+(P4.beat===3?'拍手终闪已就绪':'等待四波升腾完成');
   }
 
   function updatePhase1(dt, nowS) {
@@ -2993,6 +2937,7 @@
     ctx.globalCompositeOperation = "source-over";
 
     // 角落极简手势图标（节拍 2 教学提示；阶段二掠食者捏合教学）
+    drawPredatorWarning();
     drawAscensionFinalOverlay();
     if (scene === SCENE.AWAKEN || scene === SCENE.HERD) drawGestureIcon(nowS);
 
@@ -3128,7 +3073,7 @@
       count:spirits.length,clock:P3.clock,blend:bloomMix,assetsReady:P3Art.ready,
       p5Ready:!!bloomP5,p5Drawn:!!bloomFx,leader:{x:P3.leader.x,y:P3.leader.y},
       camera:{x:P3.camera.x,y:P3.camera.y},colors:spirits.map(function(s){return s.bloomColor;}),
-      dustCount:P3.dust.length,version:5,startCount:P3.startCount,budget:P3.budget.slice(),
+      dustCount:P3.dust.length,version:6,feedGoal:P3.feedGoal,feedBirths:P3.feedBirths,startCount:P3.startCount,budget:P3.budget.slice(),
       pending:P3.births.reduce(function(sum,b){return sum+b.remaining;},0),
       nurseries:P3.nurseries.map(function(n){var q=bloomScreen(n.x,n.y);return {x:n.x,y:n.y,sx:q.x,sy:q.y,dust:n.dust,energy:n.energy,state:n.state,assist:n.assist};}),
       seeds:P3.seeds.map(function(s){return {mature:s.mature,progress:s.progress};}),
