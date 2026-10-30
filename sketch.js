@@ -1430,7 +1430,7 @@
       merging:false,mergeStyle:'gentle',fusion:null,prevSpacing:null,wasCentered:false,
       pulse:0,beatIndex:-1,rhythmHits:0,rhythm:null,grow:0,target:60,startCount:0,
       complete:false,completion:0,budget:[0,0,0],births:[],birthTimer:0,activeNest:-1,nurseryVisibility:1,
-      feedGoal:0,feedBirths:0,feedClock:0,feedDuration:32,limit:160,eatCooldown:0,nurseries:[],
+      feedGoal:0,feedBirths:0,feedClock:0,feedDuration:24,limit:160,eatCooldown:0,nurseries:[],
       seeds:[{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0},{mature:false,progress:0,pulse:0,age:0}]};
     bloomMix=0;bloomBackdrop=null;bloomExitRocks=null;
     var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
@@ -1782,20 +1782,25 @@
   function updateBloomRhythm(dt,active,g) {
     var r=P3.rhythm;if(!r)return;
     P3.seeds.forEach(function(s){if(s.mature)s.age+=dt;});
-    if(!active){r.confirmed=null;r.candidate=null;r.stable=0;return;}
+    if(!active){r.confirmed=null;r.candidate=null;r.stable=0;r.inputGap=0;return;}
     if(r.intro>0){r.intro=Math.max(0,r.intro-dt);r.candidate=null;r.stable=0;return;}
     r.time+=dt;
     var index=Math.floor(r.time/.9);
     if(index!==r.index){r.index=index;P3.beatIndex=index;P3.pulse=.7;bloomTone();}
     if(r.cooldown>0){r.cooldown=Math.max(0,r.cooldown-dt);r.candidate=null;r.stable=0;return;}
-    // 每枚种子四次有效落拍：张、握、张、握；漏拍保留进度，等待下一次对应节拍。
-    if(g!=='Gather'&&g!=='Disperse'){r.candidate=null;r.stable=0;return;}
+    // 下一步始终按张、握、张、握推进；识别与落拍分开，漏拍后不要求追赶全局奇偶拍。
+    if(g!=='Gather'&&g!=='Disperse'){
+      r.inputGap=(r.inputGap||0)+dt;
+      if(r.inputGap>.18){r.candidate=null;r.stable=0;}
+      return;
+    }
+    r.inputGap=0;
     if(g===r.candidate)r.stable+=dt;else{r.candidate=g;r.stable=dt;}
-    if(r.stable<.12||g===r.confirmed)return;
+    if(r.stable<.08||g===r.confirmed)return;
     var current=P3.seeds.find(function(s){return !s.mature;});if(!current)return;
-    var nearest=Math.round(r.time/.9),expected=nearest%2===0?'Gather':'Disperse';
+    var nearest=Math.round(r.time/.9);
     var needed=(r.steps||0)%2===0?'Gather':'Disperse';
-    if(g!==needed||g!==expected||Math.abs(r.time-nearest*.9)>.3||nearest===r.lastHitBeat)return;
+    if(g!==needed||Math.abs(r.time-nearest*.9)>.36||nearest===r.lastHitBeat)return;
     r.confirmed=g;
     r.lastHitBeat=nearest;r.steps=(r.steps||0)+1;P3.rhythmHits++;
     current.progress=r.steps/4;current.pulse=.8;P3.pulse=.9;
@@ -1809,7 +1814,7 @@
       bloomExitRocks.age+=dt;
       if(bloomExitRocks.age>=3.6)bloomExitRocks=null;
     }
-    var active=dt>0&&hand.present&&bloomMix>.85,g=active?currentGesture():'Neutral';
+    var active=dt>0&&hand.present&&bloomMix>.85,g=active?bloomGesture():'Neutral';
     if(active){P3.inputMissingFor=0;P3.activeTime+=dt;updateBloomInput(dt);}
     else{
       P3.inputMissingFor+=dt;P3.path=[];P3.inputLast=null;P3.inputSpeed=0;P3.returnPeak=0;
@@ -1885,7 +1890,7 @@
       var r=P3.rhythm,mature=P3.seeds.filter(function(s){return s.mature;}).length;
       cue=r.intro>0?'跟随节拍：张手、握拳、张手、握拳，每枚种子两次开合':
         r.cooldown>0?'一枚种子舒展开了，新的光灵正在加入':
-        (Math.round(r.time/.9)%2===0?'随亮点张开手掌':'随亮点轻轻握拳')+' · 本枚需要'+((r.steps||0)%2===0?'张手':'握拳');
+        (r.candidate===((r.steps||0)%2===0?'Gather':'Disperse')&&r.stable>=.08?'动作已识别，跟随下一次亮点落拍':'跟随亮点'+((r.steps||0)%2===0?'张开手掌':'轻轻握拳'))+' · 每枚两次开合';
       progress='共振 '+mature+' / 3 · 本枚节拍 '+(r.steps||0)+' / 4 · 光灵 '+spirits.length+' · 保底 '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
     if(bloomMix<.85)cue='海盆渐渐展开，带着光群游向飘落的光尘';
@@ -2002,7 +2007,7 @@
       p.strokeWeight(Math.max(.7,u));p.ellipse(center.x,center.y,radius*2,radius*1.55);
       for(var i=0;i<4;i++){
         var a=-Math.PI/2+i*Math.PI/2; p.noStroke();
-        p.fill(220,239,242,(i===Math.floor(r.time/.9)%4?150:35)*fade);
+        p.fill(220,239,242,(i===(r.steps||0)?150:35)*fade);
         p.circle(center.x+Math.cos(a)*(radius+9*u),center.y+Math.sin(a)*(radius+9*u)*.78,Math.max(2.5,4*u));
       }
     }
@@ -2128,18 +2133,19 @@
     if(s.ascendWave!=null){
       s.ascentAge+=dt;
       var spread=Math.min(95,W/p2Unit()*.2);
-      var lane=900+Math.sin(index*2.4)*(spread+pulse*220)+Math.sin(s.ascentAge*1.3+s.wanderPh)*18;
+      var lane=900+Math.sin(index*2.4)*(spread+pulse*100)+Math.sin(s.ascentAge*1.3+s.wanderPh)*18;
       vx=(lane-s.wx)*2.6;vy=-(210+Math.min(1,s.ascentAge/3)*230);
       s.ascendStretch=clamp(s.ascentAge/3,0,1);
       var above=P4.camera.y-s.wy,view=H/p2Unit();
       s.ascendAlpha=1-clamp((above-view*.35)/(view*.27),0,1);
       if(above>view*.64){s.ascended=true;s.ascendAlpha=0;}
     }else{
-      var radius=(95+P4.charge*35+pulse*300)*s.orbitR,angle=s.orbitA+P4.clock*(.35+P4.charge*.85);
+      var radius=(95+P4.charge*35+pulse*140)*s.orbitR,angle=s.orbitA+P4.clock*(.35+P4.charge*.85);
       var tx=P4.nest.x+Math.cos(angle+s.wanderPh)*radius;
-      var ty=P4.nest.y+Math.sin(angle+s.wanderPh)*radius*(.38+pulse*.35);
+      var ty=P4.nest.y+Math.sin(angle+s.wanderPh)*radius*.24;
       vx=(tx-s.wx)*(P4.clapAge<3.4?5:2);vy=(ty-s.wy)*(P4.clapAge<3.4?5:2);
-      s.bright+=(1+P4.charge*.22-s.bright)*(1-Math.exp(-dt*.8));
+      var depthLight=(1+P4.charge*.22)*(1+Math.sin(angle+s.wanderPh)*.12);
+      s.bright+=(depthLight-s.bright)*(1-Math.exp(-dt*2));
     }
     var follow=1-Math.exp(-dt*(s.ascendWave==null?(P4.clapAge<3.4?8:1.6):2.2));
     s.wvx+=(vx-s.wvx)*follow;s.wvy+=(vy-s.wvy)*follow;
@@ -2409,8 +2415,8 @@
         P4.clapAge=0;
         spirits.forEach(function(s){
           if(s.ascended)return;
-          var angle=Math.atan2(s.wy-P4.nest.y,s.wx-P4.nest.x);
-          s.wvx+=Math.cos(angle)*210;if(s.ascendWave==null)s.wvy+=Math.sin(angle)*210;
+          var angle=Math.atan2((s.wy-P4.nest.y)/.24,s.wx-P4.nest.x);
+          s.wvx+=Math.cos(angle)*100;if(s.ascendWave==null)s.wvy+=Math.sin(angle)*24;
           s.flash=Math.max(s.flash,.8);
         });
       }
@@ -2613,10 +2619,37 @@
     return hand.present ? hand.category : "Neutral";
   }
 
+  function normalizeBloomGesture(category) {
+    if(category==='Gather'||category==='Open_Palm')return 'Gather';
+    if(category==='Disperse'||category==='Closed_Fist')return 'Disperse';
+    return 'Neutral';
+  }
+  function palmGestureFromLandmarks(lm) {
+    if(!lm||lm.length<21)return 'Neutral';
+    function distance(a,b){return Math.hypot(lm[a].x-lm[b].x,lm[a].y-lm[b].y,(lm[a].z||0)-(lm[b].z||0));}
+    var open=0,closed=0;
+    // 不依赖拇指位置，左右手、旋转手掌均使用指尖到腕部的相对距离。
+    [[5,6,8],[9,10,12],[13,14,16],[17,18,20]].forEach(function(f){
+      var tip=distance(f[2],0),joint=distance(f[1],0);
+      if(tip>joint*1.16&&distance(f[2],f[0])>distance(f[1],f[0])*1.35)open++;
+      else if(tip<joint*1.08)closed++;
+    });
+    return open>=3?'Gather':closed>=3?'Disperse':'Neutral';
+  }
+  function bloomGesture() {
+    if(hand.debugCategory)return normalizeBloomGesture(hand.debugCategory);
+    if(!hand.present)return 'Neutral';
+    if(hand.poseCount>=2&&performance.now()/1000-hand.poseAt<.25&&hand.poseGesture!=='Neutral')return hand.poseGesture;
+    return normalizeBloomGesture(hand.category);
+  }
+
   // 关键点处理：光晕光标跟随 + 捏合状态机（真实检测与调试注入共用）
   function processLandmarks(lm, nowS) {
     hand.present = true;
     hand.lastSeenAt = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
+    var pose=palmGestureFromLandmarks(lm);
+    hand.poseCount=pose===hand.poseGesture&&hand.lastSeenAt-(hand.poseAt||0)<.25?(hand.poseCount||0)+1:1;
+    hand.poseGesture=pose;hand.poseAt=hand.lastSeenAt;
 
     // 掌心位置（镜像翻转），EMA 平滑
     var px = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5;
