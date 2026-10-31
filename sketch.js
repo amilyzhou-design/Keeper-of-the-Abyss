@@ -843,7 +843,7 @@
 
   function resetPhase2() {
     P2 = { beat: 0, beatClock: 0, scrollVX: 0, leaderVY: 0, distance: 0, travel: 0,
-      passedGaps: 0, dustBonus: 0, lost:0, restored:0, shadow: null, shadowCount: 0, shadowWarning:null,
+      passedGaps: 0, dustBonus: 0, lastDustSound:-1, lost:0, restored:0, shadow: null, shadowCount: 0, shadowWarning:null,
       pinchHold: 0, prevPinch: false, lure: null, ballT: 0, contracting:false, burstDone: false, icon: null,
       camera: { x: 0, y: 0 }, frameShift: { x: 0, y: 0 }, leader: null,
       route: 0, routeLocked: false, routeChoice: -1, preview: false,
@@ -957,6 +957,8 @@
     resizePhase2();
     if (herdHud) herdHud.hidden = false;
     setHerdBeat(0);
+    var sound=document.getElementById('bloom-sound');sound.hidden=false;
+    sound.textContent=bloomAudioEnabled?'旅程声音：开':'旅程声音：关';
   }
 
   function setHerdBeat(beat) {
@@ -1161,6 +1163,7 @@
       var eating=Math.hypot(P2.leader.x-dust.x,P2.leader.y-dust.y)<32||spirits.some(function(s){return Math.hypot(s.wx-dust.x,s.wy-dust.y)<26;});
       if(!eating)return;
       dust.taken=true;P2.dustBonus++;
+      herdDustSound();
       P2.dustFx.push({x:dust.x,y:dust.y,age:0,life:.6});
       if(spirits.length>=100)return;
       var extra=makeSpirit(ember.x,ember.y);extra.wx=dust.x;extra.wy=dust.y;
@@ -1176,6 +1179,22 @@
       sh.x = p.x; sh.y = p.y; sh.rx = sh.wrx * u; sh.ry = sh.wry * u;
     }
     if (P2.lure) { var p = p2Screen(P2.lure.wx, P2.lure.wy); P2.lure.x = p.x; P2.lure.y = p.y; }
+  }
+  function beginShadowExit(direction) {
+    var sh=P2.shadow;if(!sh||sh.state==='exit')return;
+    sh.state='exit';sh.exitDirection=direction;sh.exitSpeed=150;sh.fade=1;
+    P2.icon=null;P2.prevPinch=false;P2.pinchHold=0;
+  }
+  function moveShadowExit(dt) {
+    var sh=P2.shadow,u=p2Unit();
+    sh.exitSpeed+=(250-sh.exitSpeed)*(1-Math.exp(-dt*2));
+    // 抵消镜头移动，保证掠影沿屏幕方向连续游离，不被镜头追上。
+    sh.wx-=P2.frameShift.x/u;sh.wy-=P2.frameShift.y/u;
+    sh.wx+=sh.exitDirection*sh.exitSpeed*dt;
+    var screen=p2Screen(sh.wx,sh.wy),radius=sh.wrx*u;
+    if((sh.exitDirection<0&&screen.x+radius<-24)||(sh.exitDirection>0&&screen.x-radius>W+24)){
+      P2.shadow=null;P2.shadowCount++;P2.icon=null;P2.pinchHold=0;P2.prevPinch=false;P2.cueClock=0;
+    }
   }
   function updateShadow(dt) {
     var sh = P2.shadow;
@@ -1197,6 +1216,9 @@
       projectP2Encounter(); return;
     }
     sh.age += dt;
+    if(sh.state==='exit'){
+      moveShadowExit(dt);projectP2Encounter();return;
+    }
     var pinching = P2.contracting;
     if (pinching) P2.pinchHold += dt;
     else {
@@ -1218,16 +1240,14 @@
       sh.wx += (P2.lure.wx - sh.wx) * Math.min(dt * 2, 1) + 130 * dt;
       sh.wy += (P2.lure.wy - sh.wy) * Math.min(dt * 2, 1);
       sh.lingerT += dt;
-      if (sh.lingerT > 2.6) sh.fade = Math.max(0, sh.fade - dt * 1.2);
+      if(sh.lingerT>2.6)beginShadowExit(1);
     } else {
       var near = sh.wx < P2.leader.x + 360 && sh.wx > P2.leader.x - 200;
       if (sh.pass === 2 && near && sh.lingerT < 2.8) { sh.lingerT += dt; sh.wx += P2.scrollVX * dt * .85; }
       else sh.wx -= 150 * dt;
       sh.wy += (p2RouteAt(sh.wx).y + (P2.leader.y - p2RouteAt(P2.leader.x).y) * .35 - sh.wy) * Math.min(dt * 2, 1);
     }
-    if (sh.wx + sh.wrx < P2.leader.x - 180 || sh.fade <= 0 || sh.age > 28) {
-      P2.shadow = null; P2.shadowCount++; P2.icon = null; P2.pinchHold = 0; P2.prevPinch = false; P2.cueClock = 0;
-    }
+    if(sh.state!=='exit'&&(sh.state==='chase'&&!P2.lure||sh.wx+sh.wrx<P2.leader.x-180||sh.age>28))beginShadowExit(sh.state==='chase'?1:-1);
     projectP2Encounter();
   }
 
@@ -1299,8 +1319,9 @@
       P2.travel = Math.max(P2.travel, P2.leader.x); P2.distance = P2.travel;
       P2.progress = clamp(P2.travel / 4800, 0, 1); P2.passedGaps = P2.progress >= 1 ? 2 : P2.progress >= .5 ? 1 : 0;
       if (P2.leader.x > 5030) {
-        // 掠影是通道中的事件，出口直接收束，不再切换到独立掠食者关卡。
-        P2.shadow = null; P2.lure = null; P2.icon = null; setHerdBeat(4); P2.completion = 1;
+        // 岩壁退场与掠影游离同时进行，掠影完全离屏后再交接海盆。
+        if(P2.shadow)beginShadowExit(P2.shadow.state==='chase'?1:-1);
+        P2.lure = null; P2.icon = null; setHerdBeat(4); P2.completion = 1;
         spirits.forEach(function (s) { s.flash = .7; });
       }
     }
@@ -1317,7 +1338,7 @@
     var u = p2Unit();
     P2.frameShift.x = (oldCX-P2.camera.x+entryShiftX)*u;
     P2.frameShift.y = (oldCY-P2.camera.y+entryShiftY)*u;
-    if (active && P2.beat === 2) updateShadow(dt);
+    if ((active && P2.beat === 2)||(P2.beat===4&&P2.shadow)) updateShadow(dt);
     else if (!active) { P2.prevPinch = false; P2.pinchHold = 0; }
     projectP2Encounter();
     spirits.forEach(function (s) { updateHerdSpirit(s, dt, nowS); });
@@ -1327,14 +1348,14 @@
     if (herdProgress) herdProgress.textContent = (P2.route ? "窄缝 " : "宽缝 ") + Math.round(P2.progress * 100) + "% · 光灵 " + spirits.length+' · 损失 '+P2.lost+' · 新生 '+P2.restored;
     if (P2.beat >= 1 && P2.beat <= 2 && herdCue) {
       herdCue.textContent = !active ? "请将手掌放回画面，旅程会在原处继续" : P2.shadowWarning ? "右侧有掠影接近，准备握拳护住光群" : P2.shadow ?
-        (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.contracting ?
+        (P2.shadow.state==='exit'?'黑影正在游离，带着微光继续前行':P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.contracting ?
           (P2.shadow.pass===2&&P2.pinchHold>=1?"光群已聚拢，张手释放诱饵":"光灵正向火种聚拢，保持握拳护住它们"):
           P2.shadow.pass === 2 ? "黑影徘徊：握拳蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，握拳让光灵聚向火种") :
         P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "掌心上下左右移动，火种会跟随；握拳聚拢光群，靠近光尘让它们进食" : "火种会跟着掌心自由游动；上下选择水道，对准右侧入口启程";
     }
     if(P2.progress>.55 && !P3Art.error && !bloomRuntimeError) initPhase3Art();
     if(P2.beat===4){
-      if(P3Art.ready && bloomP5 && P2.beatClock>1.2){enterBloom();return;}
+      if(P3Art.ready && bloomP5 && P2.beatClock>1.2&&!P2.shadow){enterBloom();return;}
       if(!P3Art.error && !bloomRuntimeError)initPhase3Art();
       if(herdCue)herdCue.textContent=P3Art.error||bloomRuntimeError?"海盆尚未浮现，请重试加载旅程素材":"狭缝渐远，前方的海盆正在浮现…";
       document.getElementById("journey-status").hidden=!(P3Art.error||bloomRuntimeError);
@@ -1461,6 +1482,22 @@
       gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(kind==='dust'?.012:.018/pitches.length,at+.015);
       gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
       osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+duration+.03);
+      osc.onended=function(){osc.disconnect();gain.disconnect();};
+    });
+  }
+  function herdDustSound() {
+    if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
+    var time=bloomAudio.currentTime;
+    if(time-P2.lastDustSound<.08)return;
+    P2.lastDustSound=time;
+    var base=[587.33,659.25,783.99,880,987.77][(P2.dustBonus-1)%5];
+    [1,1.5].forEach(function(ratio,i){
+      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.035;
+      osc.type='sine';osc.frequency.setValueAtTime(base*ratio,at);
+      osc.frequency.exponentialRampToValueAtTime(base*ratio*1.06,at+.16);
+      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(i?.006:.012,at+.012);
+      gain.gain.exponentialRampToValueAtTime(.0001,at+.23);
+      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+.26);
       osc.onended=function(){osc.disconnect();gain.disconnect();};
     });
   }
@@ -3080,7 +3117,7 @@
   });
   document.getElementById("bloom-sound").addEventListener("click",function(){
     bloomAudioEnabled=!bloomAudioEnabled;if(bloomAudioEnabled)prepareBloomAudio();
-    this.textContent=(scene===SCENE.ASCEND?'旅程声音：':'节拍声音：')+(bloomAudioEnabled?'开':'关');
+    this.textContent=(scene===SCENE.BLOOM?'节拍声音：':'旅程声音：')+(bloomAudioEnabled?'开':'关');
     this.setAttribute("aria-pressed",String(bloomAudioEnabled));
   });
   document.getElementById('ascension-mic').addEventListener('click',enableAscensionMic);
