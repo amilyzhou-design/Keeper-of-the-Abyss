@@ -843,7 +843,7 @@
 
   function resetPhase2() {
     P2 = { beat: 0, beatClock: 0, scrollVX: 0, leaderVY: 0, distance: 0, travel: 0,
-      passedGaps: 0, dustBonus: 0, lastDustSound:-1, lost:0, restored:0, shadow: null, shadowCount: 0, shadowWarning:null,
+      passedGaps: 0, dustBonus: 0, lost:0, restored:0, shadow: null, shadowCount: 0, shadowWarning:null,
       pinchHold: 0, prevPinch: false, lure: null, ballT: 0, contracting:false, burstDone: false, icon: null,
       camera: { x: 0, y: 0 }, frameShift: { x: 0, y: 0 }, leader: null,
       route: 0, routeLocked: false, routeChoice: -1, preview: false,
@@ -957,8 +957,7 @@
     resizePhase2();
     if (herdHud) herdHud.hidden = false;
     setHerdBeat(0);
-    var sound=document.getElementById('bloom-sound');sound.hidden=false;
-    sound.textContent=bloomAudioEnabled?'旅程声音：开':'旅程声音：关';
+    document.getElementById('bloom-sound').hidden=true;
   }
 
   function setHerdBeat(beat) {
@@ -1163,7 +1162,6 @@
       var eating=Math.hypot(P2.leader.x-dust.x,P2.leader.y-dust.y)<32||spirits.some(function(s){return Math.hypot(s.wx-dust.x,s.wy-dust.y)<26;});
       if(!eating)return;
       dust.taken=true;P2.dustBonus++;
-      herdDustSound();
       P2.dustFx.push({x:dust.x,y:dust.y,age:0,life:.6});
       if(spirits.length>=100)return;
       var extra=makeSpirit(ember.x,ember.y);extra.wx=dust.x;extra.wy=dust.y;
@@ -1482,21 +1480,6 @@
       gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(kind==='dust'?.012:.018/pitches.length,at+.015);
       gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
       osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+duration+.03);
-      osc.onended=function(){osc.disconnect();gain.disconnect();};
-    });
-  }
-  function herdDustSound() {
-    if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
-    var time=bloomAudio.currentTime;
-    if(time-P2.lastDustSound<.08)return;
-    P2.lastDustSound=time;
-    var base=[392,440,523.25,587.33,659.25][(P2.dustBonus-1)%5];
-    [1,1.25,1.5].forEach(function(ratio,i){
-      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.07;
-      osc.type='sine';osc.frequency.setValueAtTime(base*ratio,at);
-      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(.008/(1+i*.4),at+.065);
-      gain.gain.exponentialRampToValueAtTime(.0001,at+1.15+i*.12);
-      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+1.2+i*.12);
       osc.onended=function(){osc.disconnect();gain.disconnect();};
     });
   }
@@ -2907,7 +2890,7 @@
 
     updateEmberLife(dt);   // 火种生命周期：缩小成灯芯 / 掌晕跟手与归中
 
-    /* 渲染管线：主画布每帧清屏（环境层锐利、无残影），发光体画在离屏拖尾层
+    /* 渲染管线：主画布每帧清屏（环境层与火种无残影），光灵画在离屏拖尾层
        （黑底 + 低透明黑覆盖衰减成光带 + 随流速横向偏移），最后 'lighter' 合成。
        背景粒子与环境不再参与拖尾累积 —— 消除雨丝残痕与灰雾。 */
     if (trailMode) {
@@ -2990,9 +2973,6 @@
       ctx.globalCompositeOperation = "source-over";
     }
 
-    // 火种层
-    if (ember.alpha > 0.001) drawEmberLayer(nowS, dt);
-
     // 诱饵光球（最上层发光体）
     drawLure(nowS);
 
@@ -3016,6 +2996,9 @@
     ctx.globalCompositeOperation = "lighter";
     ctx.drawImage(trailCv, 0, 0, trailCv.width, trailCv.height, 0, 0, W, H);
     ctx.globalCompositeOperation = "source-over";
+
+    // 火种随每帧主画布重绘，光晕与亮芯不写入累积层，移动后不留下旧光晕。
+    if (ember.alpha > 0.001) drawEmberLayer(nowS, dt);
 
     // 角落极简手势图标（节拍 2 教学提示；阶段二掠食者捏合教学）
     drawPredatorWarning();
