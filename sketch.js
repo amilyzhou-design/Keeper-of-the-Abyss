@@ -1490,14 +1490,13 @@
     var time=bloomAudio.currentTime;
     if(time-P2.lastDustSound<.08)return;
     P2.lastDustSound=time;
-    var base=[587.33,659.25,783.99,880,987.77][(P2.dustBonus-1)%5];
-    [1,1.5].forEach(function(ratio,i){
-      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.035;
+    var base=[392,440,523.25,587.33,659.25][(P2.dustBonus-1)%5];
+    [1,1.25,1.5].forEach(function(ratio,i){
+      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.07;
       osc.type='sine';osc.frequency.setValueAtTime(base*ratio,at);
-      osc.frequency.exponentialRampToValueAtTime(base*ratio*1.06,at+.16);
-      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(i?.006:.012,at+.012);
-      gain.gain.exponentialRampToValueAtTime(.0001,at+.23);
-      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+.26);
+      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(.008/(1+i*.4),at+.065);
+      gain.gain.exponentialRampToValueAtTime(.0001,at+1.15+i*.12);
+      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+1.2+i*.12);
       osc.onended=function(){osc.disconnect();gain.disconnect();};
     });
   }
@@ -1919,8 +1918,8 @@
     }else if(P3.beat===2){
       cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，共振种子沿螺旋舒展':'两群微光相遇，共振种子正在诞生'):
         P3.merging?'让两群微光靠近，等待它们真正相遇':P3.splitReady?
-        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'回到标记的起点合拢；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
-        '单手向任一侧移动一小段即可分群，再回到起点合拢；也可用双手';
+        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'掌心反向回拢，让两群微光靠近；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
+        '单手向任一侧轻移，让光群分开，再反向回拢；也可用双手';
       progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):
         P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'分群相遇 · 孕育共振种子';
     }else if(P3.beat===3){
@@ -1931,7 +1930,7 @@
       progress='共振 '+mature+' / 3 · 本枚节拍 '+(r.steps||0)+' / 4 · 光灵 '+spirits.length+' · 保底 '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
     if(bloomMix<.85)cue='海盆渐渐展开，带着光群游向飘落的光尘';
-    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度与起点标记会保留':'请将手掌放回画面，进食与种子进度会保留';
+    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度会保留':'请将手掌放回画面，进食与种子进度会保留';
     herdCue.textContent=cue;herdProgress.textContent=progress;
     herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
   }
@@ -1988,14 +1987,6 @@
           p.vertex(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r*.75);
         }p.endShape();
       }
-    }
-    if(P3.beat===2&&P3.splitAnchor&&!P3.fusion&&!P3.merging){
-      var homeX=P3.splitAnchor.x*W,homeY=P3.splitAnchor.y*H,mark=Math.max(.65,u);
-      p.noFill();p.stroke(190,220,235,65*fade);p.strokeWeight(Math.max(.7,u));
-      p.circle(homeX,homeY,22*mark);
-      p.noStroke();p.fill(190,220,235,120*fade);p.textAlign(bloomP5.CENTER);
-      p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
-      p.text('起点',homeX,homeY+26*mark);
     }
     if(P3.beat===2&&P3.split>.1&&!P3.fusion&&P3.centers){
       P3.centers.forEach(function(c,i){
@@ -2140,6 +2131,7 @@
     var other=hand.secondary&&performance.now()/1000-hand.secondary.at<.3?hand.secondary:null;
     var y=hand.cursor.y/H,x=hand.cursor.x/W;
     return {x:other?(x+other.x/W)/2:x,y:other?(y+other.y/H)/2:y,
+      chargeY:other?Math.min(y,other.y/H):y,
       high:other?Math.max(y,other.y/H)<.27:y<.27};
   }
   function ascensionSound(index,finale) {
@@ -2204,6 +2196,17 @@
     document.getElementById('ending-duration').textContent='这一程 · '+Math.floor(elapsed/60)+' 分 '+elapsed%60+' 秒';
     document.getElementById('ending-badge').hidden=!P4.stats.narrow;
   }
+  function updateAscensionCharge(dt,sample) {
+    var y=sample.chargeY==null?sample.y:sample.chargeY;
+    if(P4.chargeBase==null)P4.chargeBase=clamp(y,.5,.85);
+    P4.chargeBase=Math.max(P4.chargeBase,clamp(y,.5,.85));
+    var raised=y<=.5||P4.chargeBase-y>=.08;
+    if(raised){
+      P4.charge=Math.min(1,P4.charge+dt/1.1);
+      P4.chargeHold=P4.charge>=.98?P4.chargeHold+dt:0;
+      if(P4.chargeHold>=.12){P4.charge=1;setAscensionBeat(2);}
+    }else P4.chargeHold=Math.max(0,P4.chargeHold-dt*.5);
+  }
   function updatePhase4(dt) {
     P4.clapAge+=dt;
     P4.clock+=dt;P4.beatClock+=dt;P4.blend=Math.min(1,P4.blend+dt/4.8);
@@ -2213,11 +2216,7 @@
     if(active){
       P4.missing=0;P4.lastHandY=sample.y;
       if(P4.beat===1){
-        if(P4.chargeBase==null)P4.chargeBase=clamp(sample.y,.55,.82);
-        var height=clamp((P4.chargeBase-sample.y)/Math.max(.2,P4.chargeBase-.25),0,1);
-        P4.charge+=(height-P4.charge)*(1-Math.exp(-dt*2.8));
-        P4.chargeHold=P4.charge>.84?P4.chargeHold+dt:0;
-        if(P4.chargeHold>.65){P4.charge=1;setAscensionBeat(2);}
+        updateAscensionCharge(dt,sample);
       }else if(P4.beat===2&&P4.waves<4){
         if(sample.y>.5){P4.armed=true;P4.lowY=Math.max(P4.lowY,sample.y);}
         if(P4.armed&&P4.cooldown<=0&&P4.lowY-sample.y>.13&&sample.y<.48)P4.pushHold+=dt;
@@ -2228,7 +2227,8 @@
         if(P4.finalHold>=2)finishAscension('hands');
       }
     }else{
-      P4.missing+=dt;P4.pushHold=0;P4.chargeHold=0;P4.finalHold=0;
+      P4.missing+=dt;P4.pushHold=0;P4.finalHold=0;
+      if(P4.missing>.45)P4.chargeHold=0;
       if(P4.missing>.8){P4.armed=false;P4.lowY=0;P4.lastHandY=null;}
     }
     var oldX=P4.camera.x,oldY=P4.camera.y;
@@ -2256,7 +2256,7 @@
   }
   function updateAscensionHud(active) {
     var cue,progress;
-    if(P4.beat===1){cue='缓缓举高手掌，让底部的星河蓄满光';progress='蓄光 '+Math.round(P4.charge*100)+'%';}
+    if(P4.beat===1){cue='把手掌轻抬到画面上半部，稍停片刻，让星河蓄满光';progress='蓄光 '+Math.round(P4.charge*100)+'%';}
     else if(P4.beat===2){
       cue=P4.waves===4?'最后一波微光正在游向海面':P4.armed?'向上推送掌心，送出下一波微光':'先把掌心放低，再向上推送一波微光';
       progress='送光 '+P4.waves+' / 4';
