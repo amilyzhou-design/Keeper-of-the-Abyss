@@ -957,7 +957,6 @@
     resizePhase2();
     if (herdHud) herdHud.hidden = false;
     setHerdBeat(0);
-    document.getElementById('bloom-sound').hidden=true;
   }
 
   function setHerdBeat(beat) {
@@ -1178,22 +1177,6 @@
     }
     if (P2.lure) { var p = p2Screen(P2.lure.wx, P2.lure.wy); P2.lure.x = p.x; P2.lure.y = p.y; }
   }
-  function beginShadowExit(direction) {
-    var sh=P2.shadow;if(!sh||sh.state==='exit')return;
-    sh.state='exit';sh.exitDirection=direction;sh.exitSpeed=150;sh.fade=1;
-    P2.icon=null;P2.prevPinch=false;P2.pinchHold=0;
-  }
-  function moveShadowExit(dt) {
-    var sh=P2.shadow,u=p2Unit();
-    sh.exitSpeed+=(250-sh.exitSpeed)*(1-Math.exp(-dt*2));
-    // 抵消镜头移动，保证掠影沿屏幕方向连续游离，不被镜头追上。
-    sh.wx-=P2.frameShift.x/u;sh.wy-=P2.frameShift.y/u;
-    sh.wx+=sh.exitDirection*sh.exitSpeed*dt;
-    var screen=p2Screen(sh.wx,sh.wy),radius=sh.wrx*u;
-    if((sh.exitDirection<0&&screen.x+radius<-24)||(sh.exitDirection>0&&screen.x-radius>W+24)){
-      P2.shadow=null;P2.shadowCount++;P2.icon=null;P2.pinchHold=0;P2.prevPinch=false;P2.cueClock=0;
-    }
-  }
   function updateShadow(dt) {
     var sh = P2.shadow;
     if (P2.lure) {
@@ -1214,9 +1197,6 @@
       projectP2Encounter(); return;
     }
     sh.age += dt;
-    if(sh.state==='exit'){
-      moveShadowExit(dt);projectP2Encounter();return;
-    }
     var pinching = P2.contracting;
     if (pinching) P2.pinchHold += dt;
     else {
@@ -1238,14 +1218,16 @@
       sh.wx += (P2.lure.wx - sh.wx) * Math.min(dt * 2, 1) + 130 * dt;
       sh.wy += (P2.lure.wy - sh.wy) * Math.min(dt * 2, 1);
       sh.lingerT += dt;
-      if(sh.lingerT>2.6)beginShadowExit(1);
+      if (sh.lingerT > 2.6) sh.fade = Math.max(0, sh.fade - dt * 1.2);
     } else {
       var near = sh.wx < P2.leader.x + 360 && sh.wx > P2.leader.x - 200;
       if (sh.pass === 2 && near && sh.lingerT < 2.8) { sh.lingerT += dt; sh.wx += P2.scrollVX * dt * .85; }
       else sh.wx -= 150 * dt;
       sh.wy += (p2RouteAt(sh.wx).y + (P2.leader.y - p2RouteAt(P2.leader.x).y) * .35 - sh.wy) * Math.min(dt * 2, 1);
     }
-    if(sh.state!=='exit'&&(sh.state==='chase'&&!P2.lure||sh.wx+sh.wrx<P2.leader.x-180||sh.age>28))beginShadowExit(sh.state==='chase'?1:-1);
+    if (sh.wx + sh.wrx < P2.leader.x - 180 || sh.fade <= 0 || sh.age > 28) {
+      P2.shadow = null; P2.shadowCount++; P2.icon = null; P2.pinchHold = 0; P2.prevPinch = false; P2.cueClock = 0;
+    }
     projectP2Encounter();
   }
 
@@ -1317,9 +1299,8 @@
       P2.travel = Math.max(P2.travel, P2.leader.x); P2.distance = P2.travel;
       P2.progress = clamp(P2.travel / 4800, 0, 1); P2.passedGaps = P2.progress >= 1 ? 2 : P2.progress >= .5 ? 1 : 0;
       if (P2.leader.x > 5030) {
-        // 岩壁退场与掠影游离同时进行，掠影完全离屏后再交接海盆。
-        if(P2.shadow)beginShadowExit(P2.shadow.state==='chase'?1:-1);
-        P2.lure = null; P2.icon = null; setHerdBeat(4); P2.completion = 1;
+        // 掠影是通道中的事件，出口直接收束，不再切换到独立掠食者关卡。
+        P2.shadow = null; P2.lure = null; P2.icon = null; setHerdBeat(4); P2.completion = 1;
         spirits.forEach(function (s) { s.flash = .7; });
       }
     }
@@ -1336,7 +1317,7 @@
     var u = p2Unit();
     P2.frameShift.x = (oldCX-P2.camera.x+entryShiftX)*u;
     P2.frameShift.y = (oldCY-P2.camera.y+entryShiftY)*u;
-    if ((active && P2.beat === 2)||(P2.beat===4&&P2.shadow)) updateShadow(dt);
+    if (active && P2.beat === 2) updateShadow(dt);
     else if (!active) { P2.prevPinch = false; P2.pinchHold = 0; }
     projectP2Encounter();
     spirits.forEach(function (s) { updateHerdSpirit(s, dt, nowS); });
@@ -1346,14 +1327,14 @@
     if (herdProgress) herdProgress.textContent = (P2.route ? "窄缝 " : "宽缝 ") + Math.round(P2.progress * 100) + "% · 光灵 " + spirits.length+' · 损失 '+P2.lost+' · 新生 '+P2.restored;
     if (P2.beat >= 1 && P2.beat <= 2 && herdCue) {
       herdCue.textContent = !active ? "请将手掌放回画面，旅程会在原处继续" : P2.shadowWarning ? "右侧有掠影接近，准备握拳护住光群" : P2.shadow ?
-        (P2.shadow.state==='exit'?'黑影正在游离，带着微光继续前行':P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.contracting ?
+        (P2.shadow.state === "chase" ? "诱饵引开了黑影，带着光群继续前行" : P2.contracting ?
           (P2.shadow.pass===2&&P2.pinchHold>=1?"光群已聚拢，张手释放诱饵":"光灵正向火种聚拢，保持握拳护住它们"):
           P2.shadow.pass === 2 ? "黑影徘徊：握拳蓄力一秒，再张手释放诱饵" : "黑影正在通道里掠过，握拳让光灵聚向火种") :
         P2.blocked ? "岩壁就在身旁，轻移掌心回到水中" : P2.routeLocked ? "掌心上下左右移动，火种会跟随；握拳聚拢光群，靠近光尘让它们进食" : "火种会跟着掌心自由游动；上下选择水道，对准右侧入口启程";
     }
     if(P2.progress>.55 && !P3Art.error && !bloomRuntimeError) initPhase3Art();
     if(P2.beat===4){
-      if(P3Art.ready && bloomP5 && P2.beatClock>1.2&&!P2.shadow){enterBloom();return;}
+      if(P3Art.ready && bloomP5 && P2.beatClock>1.2){enterBloom();return;}
       if(!P3Art.error && !bloomRuntimeError)initPhase3Art();
       if(herdCue)herdCue.textContent=P3Art.error||bloomRuntimeError?"海盆尚未浮现，请重试加载旅程素材":"狭缝渐远，前方的海盆正在浮现…";
       document.getElementById("journey-status").hidden=!(P3Art.error||bloomRuntimeError);
@@ -1901,8 +1882,8 @@
     }else if(P3.beat===2){
       cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，共振种子沿螺旋舒展':'两群微光相遇，共振种子正在诞生'):
         P3.merging?'让两群微光靠近，等待它们真正相遇':P3.splitReady?
-        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'掌心反向回拢，让两群微光靠近；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
-        '单手向任一侧轻移，让光群分开，再反向回拢；也可用双手';
+        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'回到标记的起点合拢；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
+        '单手向任一侧移动一小段即可分群，再回到起点合拢；也可用双手';
       progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):
         P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'分群相遇 · 孕育共振种子';
     }else if(P3.beat===3){
@@ -1913,7 +1894,7 @@
       progress='共振 '+mature+' / 3 · 本枚节拍 '+(r.steps||0)+' / 4 · 光灵 '+spirits.length+' · 保底 '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
     if(bloomMix<.85)cue='海盆渐渐展开，带着光群游向飘落的光尘';
-    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度会保留':'请将手掌放回画面，进食与种子进度会保留';
+    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度与起点标记会保留':'请将手掌放回画面，进食与种子进度会保留';
     herdCue.textContent=cue;herdProgress.textContent=progress;
     herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
   }
@@ -1970,6 +1951,14 @@
           p.vertex(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r*.75);
         }p.endShape();
       }
+    }
+    if(P3.beat===2&&P3.splitAnchor&&!P3.fusion&&!P3.merging){
+      var homeX=P3.splitAnchor.x*W,homeY=P3.splitAnchor.y*H,mark=Math.max(.65,u);
+      p.noFill();p.stroke(190,220,235,65*fade);p.strokeWeight(Math.max(.7,u));
+      p.circle(homeX,homeY,22*mark);
+      p.noStroke();p.fill(190,220,235,120*fade);p.textAlign(bloomP5.CENTER);
+      p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
+      p.text('起点',homeX,homeY+26*mark);
     }
     if(P3.beat===2&&P3.split>.1&&!P3.fusion&&P3.centers){
       P3.centers.forEach(function(c,i){
@@ -2114,7 +2103,6 @@
     var other=hand.secondary&&performance.now()/1000-hand.secondary.at<.3?hand.secondary:null;
     var y=hand.cursor.y/H,x=hand.cursor.x/W;
     return {x:other?(x+other.x/W)/2:x,y:other?(y+other.y/H)/2:y,
-      chargeY:other?Math.min(y,other.y/H):y,
       high:other?Math.max(y,other.y/H)<.27:y<.27};
   }
   function ascensionSound(index,finale) {
@@ -2179,17 +2167,6 @@
     document.getElementById('ending-duration').textContent='这一程 · '+Math.floor(elapsed/60)+' 分 '+elapsed%60+' 秒';
     document.getElementById('ending-badge').hidden=!P4.stats.narrow;
   }
-  function updateAscensionCharge(dt,sample) {
-    var y=sample.chargeY==null?sample.y:sample.chargeY;
-    if(P4.chargeBase==null)P4.chargeBase=clamp(y,.5,.85);
-    P4.chargeBase=Math.max(P4.chargeBase,clamp(y,.5,.85));
-    var raised=y<=.5||P4.chargeBase-y>=.08;
-    if(raised){
-      P4.charge=Math.min(1,P4.charge+dt/1.1);
-      P4.chargeHold=P4.charge>=.98?P4.chargeHold+dt:0;
-      if(P4.chargeHold>=.12){P4.charge=1;setAscensionBeat(2);}
-    }else P4.chargeHold=Math.max(0,P4.chargeHold-dt*.5);
-  }
   function updatePhase4(dt) {
     P4.clapAge+=dt;
     P4.clock+=dt;P4.beatClock+=dt;P4.blend=Math.min(1,P4.blend+dt/4.8);
@@ -2199,7 +2176,11 @@
     if(active){
       P4.missing=0;P4.lastHandY=sample.y;
       if(P4.beat===1){
-        updateAscensionCharge(dt,sample);
+        if(P4.chargeBase==null)P4.chargeBase=clamp(sample.y,.55,.82);
+        var height=clamp((P4.chargeBase-sample.y)/Math.max(.2,P4.chargeBase-.25),0,1);
+        P4.charge+=(height-P4.charge)*(1-Math.exp(-dt*2.8));
+        P4.chargeHold=P4.charge>.84?P4.chargeHold+dt:0;
+        if(P4.chargeHold>.65){P4.charge=1;setAscensionBeat(2);}
       }else if(P4.beat===2&&P4.waves<4){
         if(sample.y>.5){P4.armed=true;P4.lowY=Math.max(P4.lowY,sample.y);}
         if(P4.armed&&P4.cooldown<=0&&P4.lowY-sample.y>.13&&sample.y<.48)P4.pushHold+=dt;
@@ -2210,8 +2191,7 @@
         if(P4.finalHold>=2)finishAscension('hands');
       }
     }else{
-      P4.missing+=dt;P4.pushHold=0;P4.finalHold=0;
-      if(P4.missing>.45)P4.chargeHold=0;
+      P4.missing+=dt;P4.pushHold=0;P4.chargeHold=0;P4.finalHold=0;
       if(P4.missing>.8){P4.armed=false;P4.lowY=0;P4.lastHandY=null;}
     }
     var oldX=P4.camera.x,oldY=P4.camera.y;
@@ -2239,7 +2219,7 @@
   }
   function updateAscensionHud(active) {
     var cue,progress;
-    if(P4.beat===1){cue='把手掌轻抬到画面上半部，稍停片刻，让星河蓄满光';progress='蓄光 '+Math.round(P4.charge*100)+'%';}
+    if(P4.beat===1){cue='缓缓举高手掌，让底部的星河蓄满光';progress='蓄光 '+Math.round(P4.charge*100)+'%';}
     else if(P4.beat===2){
       cue=P4.waves===4?'最后一波微光正在游向海面':P4.armed?'向上推送掌心，送出下一波微光':'先把掌心放低，再向上推送一波微光';
       progress='送光 '+P4.waves+' / 4';
@@ -2890,7 +2870,7 @@
 
     updateEmberLife(dt);   // 火种生命周期：缩小成灯芯 / 掌晕跟手与归中
 
-    /* 渲染管线：主画布每帧清屏（环境层与火种无残影），光灵画在离屏拖尾层
+    /* 渲染管线：主画布每帧清屏（环境层锐利、无残影），发光体画在离屏拖尾层
        （黑底 + 低透明黑覆盖衰减成光带 + 随流速横向偏移），最后 'lighter' 合成。
        背景粒子与环境不再参与拖尾累积 —— 消除雨丝残痕与灰雾。 */
     if (trailMode) {
@@ -2973,6 +2953,9 @@
       ctx.globalCompositeOperation = "source-over";
     }
 
+    // 火种层
+    if (ember.alpha > 0.001) drawEmberLayer(nowS, dt);
+
     // 诱饵光球（最上层发光体）
     drawLure(nowS);
 
@@ -2996,9 +2979,6 @@
     ctx.globalCompositeOperation = "lighter";
     ctx.drawImage(trailCv, 0, 0, trailCv.width, trailCv.height, 0, 0, W, H);
     ctx.globalCompositeOperation = "source-over";
-
-    // 火种随每帧主画布重绘，光晕与亮芯不写入累积层，移动后不留下旧光晕。
-    if (ember.alpha > 0.001) drawEmberLayer(nowS, dt);
 
     // 角落极简手势图标（节拍 2 教学提示；阶段二掠食者捏合教学）
     drawPredatorWarning();
@@ -3100,7 +3080,7 @@
   });
   document.getElementById("bloom-sound").addEventListener("click",function(){
     bloomAudioEnabled=!bloomAudioEnabled;if(bloomAudioEnabled)prepareBloomAudio();
-    this.textContent=(scene===SCENE.BLOOM?'节拍声音：':'旅程声音：')+(bloomAudioEnabled?'开':'关');
+    this.textContent=(scene===SCENE.ASCEND?'旅程声音：':'节拍声音：')+(bloomAudioEnabled?'开':'关');
     this.setAttribute("aria-pressed",String(bloomAudioEnabled));
   });
   document.getElementById('ascension-mic').addEventListener('click',enableAscensionMic);
