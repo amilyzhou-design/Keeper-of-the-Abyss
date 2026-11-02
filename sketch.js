@@ -22,7 +22,7 @@
 
    交付结构（课程三文件约束）：index.html / style.css / sketch.js
    + gesture_recognizer.task（现有手势模型数据文件，非代码）。
-   阶段二与阶段三 WebP 保存在同级 assets/images/ 文件夹，路线数据内嵌在 sketch.js。
+   四阶段 WebP 保存在同级 assets/images/ 文件夹，路线数据内嵌在 sketch.js。
    MediaPipe 运行时为 CDN 库引用（方案 7.2：库引用不占文件数）。
 
    【临时调试钩子】ritual 场景下点击画面 = 模拟捏合点亮；
@@ -691,6 +691,105 @@
     s.y += s.vy * dt;
     s.bornT += dt;
     s.flash = Math.max(s.flash - dt * 1.2, 0);
+  }
+
+  /* ---------- 阶段一水彩视差：共享 p5 离屏实例，由主 tick 统一绘制 ---------- */
+  var P1Art = { images: {}, textures: {}, ready: false, loading: false, error: null,
+    runtimeError: null, fade: 0, x: 0, y: 0, visible: false, p5Drawn: false };
+  var awakenFx = null;
+  var P1_LAYERS = [
+    { key: 'base', file: 'assets/images/p1_base.webp', opacity: 1, depth: .05 },
+    { key: 'far', file: 'assets/images/p1_far.webp', opacity: .34, depth: .18 },
+    { key: 'mid', file: 'assets/images/p1_mid.webp', opacity: .65, depth: .48 },
+    { key: 'front', file: 'assets/images/p1_foreground.webp', opacity: .85, depth: 1 }
+  ];
+
+  function initPhase1Art() {
+    if (!P1Art.loading && !P1Art.ready) {
+      P1Art.loading = true; P1Art.error = null;
+      Promise.all(P1_LAYERS.map(function(layer) {
+        return new Promise(function(resolve, reject) {
+          var im = new Image();
+          im.onload = function() { resolve([layer.key, im]); };
+          im.onerror = function() { reject(new Error('无法加载 ' + layer.file)); };
+          im.src = layer.file;
+        });
+      })).then(function(images) {
+        images.forEach(function(pair) { P1Art.images[pair[0]] = pair[1]; });
+        P1Art.ready = true; P1Art.loading = false;
+      }).catch(function(error) {
+        P1Art.loading = false; P1Art.error = error;
+        console.warn('苏醒背景加载失败', error);
+      });
+    }
+    // 不等待此 Promise 才启动摄像头或推进玩法；库延迟时仍可用 Canvas 显示图层。
+    loadBloomRuntime().then(function() { P1Art.runtimeError = null; }).catch(function(error) {
+      P1Art.runtimeError = error; console.warn('苏醒背景 p5.js 暂不可用', error);
+    });
+  }
+
+  function resetPhase1Art() {
+    P1Art.fade = 0; P1Art.x = 0; P1Art.y = 0;
+    P1Art.visible = false; P1Art.p5Drawn = false;
+    if (awakenFx) { awakenFx.remove(); awakenFx = null; }
+  }
+
+  function drawPhase1Environment(dt) {
+    P1Art.visible = false; P1Art.p5Drawn = false;
+    if (scene === SCENE.TITLE || scene >= SCENE.BLOOM || !P1Art.ready) return;
+    var transition = scene === SCENE.HERD ? 1 - easeInOutCubic(morphT) : 1;
+    if (transition < .001) {
+      if (awakenFx) { awakenFx.remove(); awakenFx = null; }
+      return;
+    }
+    P1Art.fade = Math.min(1, P1Art.fade + dt / 1.2);
+    var entry = scene === SCENE.DIVING ? easeInOutCubic(clamp(sceneClock / DIVE_DURATION, 0, 1)) : 1;
+    var opacity = P1Art.fade * entry * transition;
+    if (opacity < .001) return;
+    var targetX = hand.present ? clamp((hand.cursor.x / W - .5) * 2, -1, 1) : 0;
+    var targetY = hand.present ? clamp((hand.cursor.y / H - .5) * 2, -1, 1) : 0;
+    var follow = 1 - Math.exp(-dt * 3);
+    P1Art.x = lerp(P1Art.x, targetX, follow); P1Art.y = lerp(P1Art.y, targetY, follow);
+    var travel = Math.min(W, H) * .025;
+    var p = null;
+    if (bloomP5) {
+      // 同一 p5 实例承担四阶段绘制；单独的背景图层不写入发光拖尾。
+      var scale = Math.min(1, 900 / Math.min(W, H));
+      var fw = Math.max(1, Math.round(W * scale)), fh = Math.max(1, Math.round(H * scale));
+      if (!awakenFx || awakenFx.width !== fw || awakenFx.height !== fh) {
+        if (awakenFx) awakenFx.remove();
+        awakenFx = bloomP5.createGraphics(fw, fh); awakenFx.pixelDensity(1);
+      }
+      P1_LAYERS.forEach(function(layer) {
+        if (P1Art.textures[layer.key]) return;
+        var im = P1Art.images[layer.key], texture = bloomP5.createImage(im.width, im.height);
+        texture.drawingContext.drawImage(im, 0, 0);
+        P1Art.textures[layer.key] = texture;
+      });
+      p = awakenFx; p.clear(); p.push(); p.scale(fw / W, fh / H);
+      p.imageMode(bloomP5.CORNER); p.blendMode(bloomP5.BLEND);
+    }
+    ctx.save(); ctx.globalCompositeOperation = 'source-over';
+    P1_LAYERS.forEach(function(layer) {
+      var im = P1Art.images[layer.key];
+      // 同一组原图居中 cover；8% 超出屏幕，覆盖视差位移，横竖屏共用构图。
+      var zoom = Math.max(W / im.width, H / im.height) * 1.08;
+      var width = im.width * zoom, height = im.height * zoom;
+      var x = (W - width) / 2 - P1Art.x * travel * layer.depth;
+      var y = (H - height) / 2 - P1Art.y * travel * layer.depth;
+      if (p) {
+        p.tint(255, layer.opacity * 255);
+        p.image(P1Art.textures[layer.key], x, y, width, height);
+      } else {
+        ctx.globalAlpha = opacity * layer.opacity;
+        ctx.drawImage(im, x, y, width, height);
+      }
+    });
+    if (p) {
+      p.noTint(); p.pop(); ctx.globalAlpha = opacity;
+      ctx.drawImage(p.canvas, 0, 0, W, H); P1Art.p5Drawn = true;
+    }
+    ctx.restore(); P1Art.visible = true;
   }
 
   /* ---------- 节拍推进 ---------- */
@@ -2748,6 +2847,7 @@
     screenEl.classList.add("leaving");           // 标题组上飘淡出（CSS 动画）
     setTimeout(function () { screenEl.style.display = "none"; }, 2000);
     initHandTracking();                          // 借这次点击申请摄像头并加载模型（下潜的 3.4s 正好完成初始化）
+    initPhase1Art();                             // 与摄像头并行加载，沿用现有 p5 实例。
   }
 
   function enterRitual() {
@@ -2779,6 +2879,7 @@
     overlayA = 0;
     trailMode = false;
     morphT = 0;
+    resetPhase1Art();
     ember.alpha = 0;
     ember.lit = false;
     ember.gutterT = -1;
@@ -2899,6 +3000,7 @@
     }
 
     // 远景礁石海沟剪影（最底层视差，方案 5.5）
+    drawPhase1Environment(dt);
     drawFarReefs();
     drawBloomEnvironment();
     drawAscensionEnvironment();
@@ -2926,11 +3028,15 @@
       if (p.x < -8) p.x = W + 8; else if (p.x > W + 8) p.x = -8;
       if (p.y < -8) p.y = H + 8; else if (p.y > H + 8) p.y = -8;
 
+      // 水彩背景显现后，深渊覆盖仅用于压暗尘埃，避免把整幅背景盖黑。
+      ctx.save();
+      if (P1Art.visible && !trailMode) ctx.globalAlpha *= 1 - overlayA;
       drawParticle(p, now);
+      ctx.restore();
     }
 
     // 深渊色覆盖层（仅转场期间；拖尾模式下底色由覆盖法收敛）
-    if (!trailMode && overlayA > 0.001) {
+    if (!trailMode && !P1Art.visible && overlayA > 0.001) {
       ctx.fillStyle = rgbaStr(bgColor(), overlayA);
       ctx.fillRect(0, 0, W, H);
     }
@@ -3074,7 +3180,8 @@
      与真实识别共用 processLandmarks 处理管线，交付前可整体删除。 */
   document.getElementById("journey-retry").addEventListener("click",function(){
     prepareBloomAudio();bloomRuntimeError=null;
-    if((scene===SCENE.BLOOM&&P3.beat===4)||scene===SCENE.ASCEND)initPhase4Art(true);
+    if(scene>=SCENE.DIVING&&scene<=SCENE.AWAKEN)initPhase1Art();
+    else if((scene===SCENE.BLOOM&&P3.beat===4)||scene===SCENE.ASCEND)initPhase4Art(true);
     else initPhase3Art();
     document.getElementById("journey-status").hidden=true;
   });
@@ -3094,6 +3201,14 @@
     hero: function () { return heroSpirit && heroSpirit.heroState ? heroSpirit.heroState.name : null; },
     ember: function () { return { scale: ember.scale, alpha: ember.alpha, x: ember.x, y: ember.y }; },
     morph: function () { return morphT; },
+    p1: function() { return { assetsReady: P1Art.ready, assetsError: P1Art.error && String(P1Art.error),
+      p5Ready: !!bloomP5, p5Drawn: P1Art.p5Drawn, visible: P1Art.visible, fade: P1Art.fade,
+      x: P1Art.x, y: P1Art.y, layers: P1_LAYERS.length }; },
+    previewPhase1: function() {
+      resetAll(); screenEl.style.display = 'none';
+      ember.lit = true; ember.alpha = 1; ember.scale = .45;
+      startBeat1(); initPhase1Art();
+    },
     p2: function () {
       return { beat: P2.beat, route: P2.route ? "narrow" : "wide", routeLocked: P2.routeLocked,
         progress: P2.progress, gaps: P2.passedGaps, dust: P2.dustBonus,
