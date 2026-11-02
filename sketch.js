@@ -697,6 +697,7 @@
   var P1Art = { images: {}, textures: {}, ready: false, loading: false, error: null,
     runtimeError: null, fade: 0, x: 0, y: 0, visible: false, p5Drawn: false };
   var awakenFx = null;
+  var P1_BACKGROUND_BRIGHTNESS = .30; // 开场环境压暗至原图 30%，低于阶段二水道。
   var P1_LAYERS = [
     { key: 'base', file: 'assets/images/p1_base.webp', opacity: 1, depth: .05 },
     { key: 'far', file: 'assets/images/p1_far.webp', opacity: .34, depth: .18 },
@@ -736,15 +737,16 @@
 
   function drawPhase1Environment(dt) {
     P1Art.visible = false; P1Art.p5Drawn = false;
-    if (scene === SCENE.TITLE || scene >= SCENE.BLOOM || !P1Art.ready) return;
+    // 下潜、待捏合、点亮演出与点亮后的短暂停留均保留原有纯深渊环境。
+    if (scene !== SCENE.AWAKEN && scene !== SCENE.HERD) return;
+    if (!P1Art.ready) return;
     var transition = scene === SCENE.HERD ? 1 - easeInOutCubic(morphT) : 1;
     if (transition < .001) {
       if (awakenFx) { awakenFx.remove(); awakenFx = null; }
       return;
     }
     P1Art.fade = Math.min(1, P1Art.fade + dt / 1.2);
-    var entry = scene === SCENE.DIVING ? easeInOutCubic(clamp(sceneClock / DIVE_DURATION, 0, 1)) : 1;
-    var opacity = P1Art.fade * entry * transition;
+    var opacity = P1Art.fade * transition;
     if (opacity < .001) return;
     var targetX = hand.present ? clamp((hand.cursor.x / W - .5) * 2, -1, 1) : 0;
     var targetY = hand.present ? clamp((hand.cursor.y / H - .5) * 2, -1, 1) : 0;
@@ -770,6 +772,7 @@
       p.imageMode(bloomP5.CORNER); p.blendMode(bloomP5.BLEND);
     }
     ctx.save(); ctx.globalCompositeOperation = 'source-over';
+    if (!p) ctx.filter = 'brightness(' + P1_BACKGROUND_BRIGHTNESS + ')';
     P1_LAYERS.forEach(function(layer) {
       var im = P1Art.images[layer.key];
       // 同一组原图居中 cover；8% 超出屏幕，覆盖视差位移，横竖屏共用构图。
@@ -778,7 +781,7 @@
       var x = (W - width) / 2 - P1Art.x * travel * layer.depth;
       var y = (H - height) / 2 - P1Art.y * travel * layer.depth;
       if (p) {
-        p.tint(255, layer.opacity * 255);
+        p.tint(255 * P1_BACKGROUND_BRIGHTNESS, layer.opacity * 255);
         p.image(P1Art.textures[layer.key], x, y, width, height);
       } else {
         ctx.globalAlpha = opacity * layer.opacity;
