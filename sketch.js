@@ -1538,9 +1538,9 @@
     var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
   }
 
-  var BGM_LEVEL = .055;
+  var BGM_LEVEL = .04;
   var bgmButton = document.getElementById('bgm-start');
-  var bgmSource = null, bgmGain = null, bgmLoading = false, bgmDuckUntil = 0;
+  var bgmSource = null, bgmLoading = false;
 
   function updateMusicButton() {
     bgmButton.hidden = scene !== SCENE.TITLE || !bloomAudio ||
@@ -1590,7 +1590,6 @@
       gain.gain.setTargetAtTime(BGM_LEVEL, audio.currentTime, .18);
       source.start();
       bgmSource = source;
-      bgmGain = gain;
     }).catch(function(error) {
       console.warn('背景音乐暂不可用', error);
     }).finally(function() {
@@ -1608,15 +1607,6 @@
     }
   }
 
-  function duckJourneyMusic(duration) {
-    if (!bgmGain) return;
-    var now = bloomAudio.currentTime;
-    bgmDuckUntil = Math.max(bgmDuckUntil, now + duration);
-    bgmGain.gain.cancelScheduledValues(now);
-    bgmGain.gain.setTargetAtTime(BGM_LEVEL * .34, now, .035);
-    bgmGain.gain.setTargetAtTime(BGM_LEVEL, bgmDuckUntil, .3);
-  }
-
   function prepareBloomAudio() {
     // 仅由已授权的入场点击/资源重试解锁，不申请麦克风。
     if (!bloomAudioEnabled) return;
@@ -1631,7 +1621,6 @@
     if(kind==='dust'){
       if(time-(P3.lastDustSound||-1)<.1)return;P3.lastDustSound=time;
     }
-    duckJourneyMusic(kind==='dust'?.18:kind==='fusion'?.8:.42);
     var pitches=kind==='dust'?[[523.25,587.33,659.25,783.99,880][index%5]]:
       kind==='pulse'?[index%2===0?392:261.63]:kind==='hatch'?[261.63,329.63,392]:
       kind==='seed'?[392,523.25,659.25]:[261.63,329.63,392];
@@ -2288,7 +2277,6 @@
   }
   function ascensionSound(index,finale) {
     if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
-    duckJourneyMusic(finale?2.4:1.25);
     var base=[261.63,329.63,392,523.25][index%4],time=bloomAudio.currentTime;
     [1,1.25,1.5,2].forEach(function(ratio,i){
       var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.11;
