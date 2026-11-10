@@ -1538,14 +1538,92 @@
     var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
   }
 
+  var BGM_LEVEL = .055;
+  var bgmButton = document.getElementById('bgm-start');
+  var bgmSource = null, bgmGain = null, bgmLoading = false, bgmDuckUntil = 0;
+
+  function updateMusicButton() {
+    bgmButton.hidden = scene !== SCENE.TITLE || !bloomAudio ||
+      (bloomAudio.state === 'running' && (bgmSource || bgmLoading));
+  }
+
+  function journeyAudioContext() {
+    var Audio = window.AudioContext || window.webkitAudioContext;
+    if (!bloomAudio && Audio) {
+      bloomAudio = new Audio();
+      bloomAudio.addEventListener('statechange', updateMusicButton);
+    }
+    return bloomAudio;
+  }
+
+  function loadJourneyMusic() {
+    if (bgmSource || bgmLoading) return;
+    var audio = journeyAudioContext();
+    if (!audio) return;
+    bgmLoading = true;
+    updateMusicButton();
+    fetch('assets/audio/abyss-bgm.mp3').then(function(response) {
+      if (!response.ok) throw new Error('背景音乐未能加载');
+      return response.arrayBuffer();
+    }).then(function(bytes) {
+      return audio.decodeAudioData(bytes);
+    }).then(function(buffer) {
+      // 末尾叠入开头，随后从开头已叠入的部分之后继续，避免重复或中断。
+      var overlap = Math.floor(Math.min(2.5 * buffer.sampleRate, buffer.length / 4));
+      var tail = buffer.length - overlap;
+      for (var channel = 0; channel < buffer.numberOfChannels; channel++) {
+        var samples = buffer.getChannelData(channel);
+        for (var i = 0; i < overlap; i++) {
+          var angle = i / Math.max(1, overlap - 1) * Math.PI / 2;
+          samples[tail + i] = samples[tail + i] * Math.cos(angle) + samples[i] * Math.sin(angle);
+        }
+      }
+      var source = audio.createBufferSource();
+      var gain = audio.createGain();
+      source.buffer = buffer;
+      source.loop = true;
+      source.loopStart = overlap / buffer.sampleRate;
+      source.loopEnd = buffer.duration;
+      source.connect(gain);
+      gain.connect(audio.destination);
+      gain.gain.value = 0;
+      gain.gain.setTargetAtTime(BGM_LEVEL, audio.currentTime, .18);
+      source.start();
+      bgmSource = source;
+      bgmGain = gain;
+    }).catch(function(error) {
+      console.warn('背景音乐暂不可用', error);
+    }).finally(function() {
+      bgmLoading = false;
+      updateMusicButton();
+    });
+  }
+
+  function unlockJourneyMusic() {
+    try {
+      loadJourneyMusic();
+      if (bloomAudio && bloomAudio.state !== 'running') bloomAudio.resume().catch(function() {});
+    } catch (error) {
+      console.warn('背景音乐暂不可用', error);
+    }
+  }
+
+  function duckJourneyMusic(duration) {
+    if (!bgmGain) return;
+    var now = bloomAudio.currentTime;
+    bgmDuckUntil = Math.max(bgmDuckUntil, now + duration);
+    bgmGain.gain.cancelScheduledValues(now);
+    bgmGain.gain.setTargetAtTime(BGM_LEVEL * .34, now, .035);
+    bgmGain.gain.setTargetAtTime(BGM_LEVEL, bgmDuckUntil, .3);
+  }
+
   function prepareBloomAudio() {
     // 仅由已授权的入场点击/资源重试解锁，不申请麦克风。
     if (!bloomAudioEnabled) return;
     try {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!bloomAudio && AC) bloomAudio = new AC();
-      if (bloomAudio && bloomAudio.state === 'suspended') bloomAudio.resume().catch(function(){});
-    } catch (_) { bloomAudio = null; }
+      var audio = journeyAudioContext();
+      if (audio && audio.state !== 'running') audio.resume().catch(function(){});
+    } catch (_) {}
   }
   function bloomSound(kind,index) {
     if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
@@ -1553,6 +1631,7 @@
     if(kind==='dust'){
       if(time-(P3.lastDustSound||-1)<.1)return;P3.lastDustSound=time;
     }
+    duckJourneyMusic(kind==='dust'?.18:kind==='fusion'?.8:.42);
     var pitches=kind==='dust'?[[523.25,587.33,659.25,783.99,880][index%5]]:
       kind==='pulse'?[index%2===0?392:261.63]:kind==='hatch'?[261.63,329.63,392]:
       kind==='seed'?[392,523.25,659.25]:[261.63,329.63,392];
@@ -2209,6 +2288,7 @@
   }
   function ascensionSound(index,finale) {
     if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
+    duckJourneyMusic(finale?2.4:1.25);
     var base=[261.63,329.63,392,523.25][index%4],time=bloomAudio.currentTime;
     [1,1.25,1.5,2].forEach(function(ratio,i){
       var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.11;
@@ -2847,6 +2927,7 @@
     screenEl.classList.remove('returning');
     scene = SCENE.DIVING;
     sceneClock = 0;
+    updateMusicButton();
     screenEl.classList.add("leaving");           // 标题组上飘淡出（CSS 动画）
     setTimeout(function () { screenEl.style.display = "none"; }, 2000);
     initHandTracking();                          // 借这次点击申请摄像头并加载模型（下潜的 3.4s 正好完成初始化）
@@ -2922,6 +3003,7 @@
     screenEl.classList.remove("leaving");
     screenEl.classList.toggle('returning',wasEnding);
     screenEl.style.display = "";
+    updateMusicButton();
   }
 
   function updateDiving() {
@@ -3170,6 +3252,11 @@
     e.stopPropagation();
     startDive();
   });
+
+  // 在标题页预载并尝试播放；捕获第一次有效交互，覆盖标题页和入渊按钮。
+  window.addEventListener('click', unlockJourneyMusic, true);
+  window.addEventListener('keydown', unlockJourneyMusic, true);
+  unlockJourneyMusic();
 
   // 【临时调试】ritual 场景点击画面 = 模拟捏合点亮；R = 重置
   window.addEventListener("click", function () {
