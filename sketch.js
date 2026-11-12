@@ -1541,6 +1541,30 @@
   var BGM_LEVEL = .04;
   var bgmButton = document.getElementById('bgm-start');
   var bgmSource = null, bgmLoading = false;
+  var bgmGain = null, bgmFilter = null, bgmMix = null;
+  var BGM_MIX = {
+    title: { volume: .024, cutoff: 2200, fade: 2.4 },
+    descent: { volume: .016, cutoff: 1100, fade: DIVE_DURATION },
+    journey: { volume: BGM_LEVEL, cutoff: 16000, fade: 4 },
+    ending: { volume: .014, cutoff: 2500, fade: 5 }
+  };
+
+  function updateJourneyMusicMix() {
+    if (!bgmGain) return;
+    // 按画面进程渐变。关卡提示音与背景音乐各自播放。
+    var mix = BGM_MIX.journey;
+    if (scene === SCENE.TITLE) mix = BGM_MIX.title;
+    else if (scene < SCENE.AWAKEN) mix = BGM_MIX.descent;
+    else if (scene === SCENE.ASCEND && P4.beat === 4) mix = BGM_MIX.ending;
+    if (bgmMix === mix) return;
+
+    var now = bloomAudio.currentTime;
+    var cutoff = Math.min(mix.cutoff, bloomAudio.sampleRate * .49);
+    if (!bgmMix) bgmFilter.frequency.value = cutoff;
+    bgmGain.gain.setTargetAtTime(mix.volume, now, mix.fade / 3);
+    bgmFilter.frequency.setTargetAtTime(cutoff, now, mix.fade / 3);
+    bgmMix = mix;
+  }
 
   function updateMusicButton() {
     bgmButton.hidden = scene !== SCENE.TITLE || !bloomAudio ||
@@ -1580,16 +1604,21 @@
       }
       var source = audio.createBufferSource();
       var gain = audio.createGain();
+      var filter = audio.createBiquadFilter();
+      filter.type = 'lowpass';
       source.buffer = buffer;
       source.loop = true;
       source.loopStart = overlap / buffer.sampleRate;
       source.loopEnd = buffer.duration;
-      source.connect(gain);
+      source.connect(filter);
+      filter.connect(gain);
       gain.connect(audio.destination);
       gain.gain.value = 0;
-      gain.gain.setTargetAtTime(BGM_LEVEL, audio.currentTime, .18);
       source.start();
       bgmSource = source;
+      bgmGain = gain;
+      bgmFilter = filter;
+      updateJourneyMusicMix();
     }).catch(function(error) {
       console.warn('背景音乐暂不可用', error);
     }).finally(function() {
@@ -3042,6 +3071,7 @@
     else if (scene === SCENE.BLOOM) updatePhase3(dt, nowS);
     else if(scene===SCENE.ASCEND)updatePhase4(dt);
 
+    updateJourneyMusicMix();
     updateEmberLife(dt);   // 火种生命周期：缩小成灯芯 / 掌晕跟手与归中
 
     /* 渲染管线：主画布每帧清屏（环境层锐利、无残影），发光体画在离屏拖尾层
