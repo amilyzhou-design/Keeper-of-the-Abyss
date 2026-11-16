@@ -1538,178 +1538,33 @@
     var sound=document.getElementById('bloom-sound');if(sound)sound.hidden=true;
   }
 
-  var BGM_LEVEL = .04;
-  var bgmButton = document.getElementById('bgm-start');
-  var bgmSource = null, bgmLoading = false;
-  var bgmGain = null, bgmFilter = null, bgmMix = null;
-  var BGM_MIX = {
-    title: { volume: .024, cutoff: 2200, fade: 2.4 },
-    descent: { volume: .016, cutoff: 1100, fade: DIVE_DURATION },
-    journey: { volume: BGM_LEVEL, cutoff: 16000, fade: 4 },
-    ending: { volume: .014, cutoff: 2500, fade: 5 }
-  };
-
-  function updateJourneyMusicMix() {
-    if (!bgmGain) return;
-    // 按画面进程渐变。关卡提示音与背景音乐各自播放。
-    var mix = BGM_MIX.journey;
-    if (scene === SCENE.TITLE) mix = BGM_MIX.title;
-    else if (scene < SCENE.AWAKEN) mix = BGM_MIX.descent;
-    else if (scene === SCENE.ASCEND && P4.beat === 4) mix = BGM_MIX.ending;
-    if (bgmMix === mix) return;
-
-    var now = bloomAudio.currentTime;
-    var cutoff = Math.min(mix.cutoff, bloomAudio.sampleRate * .49);
-    if (!bgmMix) bgmFilter.frequency.value = cutoff;
-    bgmGain.gain.setTargetAtTime(mix.volume, now, mix.fade / 3);
-    bgmFilter.frequency.setTargetAtTime(cutoff, now, mix.fade / 3);
-    bgmMix = mix;
-  }
-
-  function updateMusicButton() {
-    bgmButton.hidden = scene !== SCENE.TITLE || !bloomAudio ||
-      (bloomAudio.state === 'running' && (bgmSource || bgmLoading));
-  }
-
-  function journeyAudioContext() {
-    var Audio = window.AudioContext || window.webkitAudioContext;
-    if (!bloomAudio && Audio) {
-      bloomAudio = new Audio();
-      bloomAudio.addEventListener('statechange', updateMusicButton);
-    }
-    return bloomAudio;
-  }
-
-  function loadJourneyMusic() {
-    if (bgmSource || bgmLoading) return;
-    var audio = journeyAudioContext();
-    if (!audio) return;
-    bgmLoading = true;
-    updateMusicButton();
-    fetch('assets/audio/abyss-bgm.mp3').then(function(response) {
-      if (!response.ok) throw new Error('背景音乐未能加载');
-      return response.arrayBuffer();
-    }).then(function(bytes) {
-      return audio.decodeAudioData(bytes);
-    }).then(function(buffer) {
-      // 末尾叠入开头，随后从开头已叠入的部分之后继续，避免重复或中断。
-      var overlap = Math.floor(Math.min(2.5 * buffer.sampleRate, buffer.length / 4));
-      var tail = buffer.length - overlap;
-      for (var channel = 0; channel < buffer.numberOfChannels; channel++) {
-        var samples = buffer.getChannelData(channel);
-        for (var i = 0; i < overlap; i++) {
-          var angle = i / Math.max(1, overlap - 1) * Math.PI / 2;
-          samples[tail + i] = samples[tail + i] * Math.cos(angle) + samples[i] * Math.sin(angle);
-        }
-      }
-      var source = audio.createBufferSource();
-      var gain = audio.createGain();
-      var filter = audio.createBiquadFilter();
-      filter.type = 'lowpass';
-      source.buffer = buffer;
-      source.loop = true;
-      source.loopStart = overlap / buffer.sampleRate;
-      source.loopEnd = buffer.duration;
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(audio.destination);
-      gain.gain.value = 0;
-      source.start();
-      bgmSource = source;
-      bgmGain = gain;
-      bgmFilter = filter;
-      updateJourneyMusicMix();
-    }).catch(function(error) {
-      console.warn('背景音乐暂不可用', error);
-    }).finally(function() {
-      bgmLoading = false;
-      updateMusicButton();
-    });
-  }
-
-  function unlockJourneyMusic() {
-    try {
-      loadJourneyMusic();
-      if (bloomAudio && bloomAudio.state !== 'running') bloomAudio.resume().catch(function() {});
-    } catch (error) {
-      console.warn('背景音乐暂不可用', error);
-    }
-  }
-
   function prepareBloomAudio() {
     // 仅由已授权的入场点击/资源重试解锁，不申请麦克风。
     if (!bloomAudioEnabled) return;
     try {
-      var audio = journeyAudioContext();
-      if (audio && audio.state !== 'running') audio.resume().catch(function(){});
-    } catch (_) {}
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!bloomAudio && AC) bloomAudio = new AC();
+      if (bloomAudio && bloomAudio.state === 'suspended') bloomAudio.resume().catch(function(){});
+    } catch (_) { bloomAudio = null; }
   }
-  // 从当前配乐常出现的 D、E、G、A 中选取提示音，避免叠加完整和弦。
-  var JOURNEY_NOTES = { D: 293.66, E: 329.63, G: 392, A: 440 };
-  var waterNoise = null;
-
-  function playJourneyCue(source, output, time, envelope) {
-    var gain = bloomAudio.createGain();
-    gain.gain.setValueAtTime(0, time);
-    gain.gain.linearRampToValueAtTime(envelope.level, time + envelope.attack);
-    gain.gain.exponentialRampToValueAtTime(.00002, time + envelope.duration);
-    output.connect(gain);
-    gain.connect(bloomAudio.destination);
-    source.start(time);
-    source.stop(time + envelope.duration + .02);
-    source.onended = function() {
-      source.disconnect();
-      if (output !== source) output.disconnect();
-      gain.disconnect();
-    };
-  }
-
-  function waterCue(time, fromHz, toHz, resonance, envelope) {
-    if (!waterNoise) {
-      var rate = bloomAudio.sampleRate;
-      waterNoise = bloomAudio.createBuffer(1, rate * 2, rate);
-      var samples = waterNoise.getChannelData(0);
-      for (var i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
+  function bloomSound(kind,index) {
+    if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
+    var time=bloomAudio.currentTime;
+    if(kind==='dust'){
+      if(time-(P3.lastDustSound||-1)<.1)return;P3.lastDustSound=time;
     }
-    var source = bloomAudio.createBufferSource();
-    source.buffer = waterNoise;
-    var filter = bloomAudio.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.Q.value = resonance;
-    filter.frequency.setValueAtTime(fromHz, time);
-    filter.frequency.exponentialRampToValueAtTime(toHz, time + envelope.duration);
-    source.connect(filter);
-    playJourneyCue(source, filter, time, envelope);
-  }
-
-  function toneCue(time, frequency, envelope) {
-    var oscillator = bloomAudio.createOscillator();
-    oscillator.type = 'sine';
-    oscillator.frequency.value = frequency;
-    playJourneyCue(oscillator, oscillator, time, envelope);
-  }
-
-  function bloomSound(kind, index) {
-    if (!bloomAudioEnabled || !bloomAudio || bloomAudio.state !== 'running') return;
-    var time = bloomAudio.currentTime;
-    if (kind === 'dust') {
-      if (time - (P3.lastDustSound || -1) < .1) return;
-      P3.lastDustSound = time;
-      waterCue(time, 640, 360, 2.8, { level: .029, attack: .018, duration: .17 });
-    } else if (kind === 'pulse') {
-      // 两种音色标出相邻拍点，节拍仍由原有玩法时钟控制。
-      var accent = index % 2 === 0;
-      waterCue(time, accent ? 500 : 780, accent ? 300 : 520, 1.8,
-        { level: accent ? .036 : .029, attack: .012, duration: .15 });
-    } else if (kind === 'fusion') {
-      waterCue(time, 330, 820, 1.2, { level: .026, attack: .1, duration: .9 });
-      toneCue(time, JOURNEY_NOTES.D, { level: .0045, attack: .095, duration: .85 });
-      toneCue(time + .14, JOURNEY_NOTES.A, { level: .0025, attack: .095, duration: .7 });
-    } else if (kind === 'seed') {
-      var note = [JOURNEY_NOTES.D, JOURNEY_NOTES.G, JOURNEY_NOTES.A][index];
-      waterCue(time, 420, 710, 1.5, { level: .019, attack: .035, duration: .42 });
-      toneCue(time + .025, note, { level: .005, attack: .065, duration: .55 });
-    }
+    var pitches=kind==='dust'?[[523.25,587.33,659.25,783.99,880][index%5]]:
+      kind==='pulse'?[index%2===0?392:261.63]:kind==='hatch'?[261.63,329.63,392]:
+      kind==='seed'?[392,523.25,659.25]:[261.63,329.63,392];
+    pitches.forEach(function(hz,i){
+      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain();
+      var at=time+(kind==='fusion'?0:i*.065),duration=kind==='dust'?.18:kind==='fusion'?.8:.42;
+      osc.type='sine';osc.frequency.value=hz;
+      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(kind==='dust'?.012:.018/pitches.length,at+.015);
+      gain.gain.exponentialRampToValueAtTime(.0001,at+duration);
+      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+duration+.03);
+      osc.onended=function(){osc.disconnect();gain.disconnect();};
+    });
   }
   function bloomTone(){bloomSound('pulse',P3.beatIndex);}
 
@@ -2353,17 +2208,16 @@
       high:other?Math.max(y,other.y/H)<.27:y<.27};
   }
   function ascensionSound(index,finale) {
-    if (!bloomAudioEnabled || !bloomAudio || bloomAudio.state !== 'running') return;
-    var time = bloomAudio.currentTime;
-    if (finale) {
-      waterCue(time, 320, 1350, .9, { level: .037, attack: .17, duration: 1.8 });
-      toneCue(time, JOURNEY_NOTES.D, { level: .006, attack: .14, duration: 1.75 });
-      toneCue(time + .22, JOURNEY_NOTES.D * 2, { level: .004, attack: .2, duration: 1.7 });
-      return;
-    }
-    var note = [JOURNEY_NOTES.D, JOURNEY_NOTES.E, JOURNEY_NOTES.G, JOURNEY_NOTES.A][index];
-    waterCue(time, 290, 690 + index * 90, 1.2, { level: .026, attack: .085, duration: .74 });
-    toneCue(time + .04, note, { level: .0055, attack: .11, duration: .86 });
+    if(!bloomAudioEnabled||!bloomAudio||bloomAudio.state!=='running')return;
+    var base=[261.63,329.63,392,523.25][index%4],time=bloomAudio.currentTime;
+    [1,1.25,1.5,2].forEach(function(ratio,i){
+      var osc=bloomAudio.createOscillator(),gain=bloomAudio.createGain(),at=time+i*.11;
+      osc.type='sine';osc.frequency.value=base*ratio;
+      gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(finale?.018:.012,at+.04);
+      gain.gain.exponentialRampToValueAtTime(.0001,at+(finale?2.1:.9));
+      osc.connect(gain);gain.connect(bloomAudio.destination);osc.start(at);osc.stop(at+(finale?2.2:1));
+      osc.onended=function(){osc.disconnect();gain.disconnect();};
+    });
   }
   function launchAscensionWave() {
     if(P4.waves>=4)return;
@@ -2993,7 +2847,6 @@
     screenEl.classList.remove('returning');
     scene = SCENE.DIVING;
     sceneClock = 0;
-    updateMusicButton();
     screenEl.classList.add("leaving");           // 标题组上飘淡出（CSS 动画）
     setTimeout(function () { screenEl.style.display = "none"; }, 2000);
     initHandTracking();                          // 借这次点击申请摄像头并加载模型（下潜的 3.4s 正好完成初始化）
@@ -3069,7 +2922,6 @@
     screenEl.classList.remove("leaving");
     screenEl.classList.toggle('returning',wasEnding);
     screenEl.style.display = "";
-    updateMusicButton();
   }
 
   function updateDiving() {
@@ -3120,7 +2972,6 @@
     else if (scene === SCENE.BLOOM) updatePhase3(dt, nowS);
     else if(scene===SCENE.ASCEND)updatePhase4(dt);
 
-    updateJourneyMusicMix();
     updateEmberLife(dt);   // 火种生命周期：缩小成灯芯 / 掌晕跟手与归中
 
     /* 渲染管线：主画布每帧清屏（环境层锐利、无残影），发光体画在离屏拖尾层
@@ -3319,11 +3170,6 @@
     e.stopPropagation();
     startDive();
   });
-
-  // 在标题页预载并尝试播放；捕获第一次有效交互，覆盖标题页和入渊按钮。
-  window.addEventListener('click', unlockJourneyMusic, true);
-  window.addEventListener('keydown', unlockJourneyMusic, true);
-  unlockJourneyMusic();
 
   // 【临时调试】ritual 场景点击画面 = 模拟捏合点亮；R = 重置
   window.addEventListener("click", function () {
