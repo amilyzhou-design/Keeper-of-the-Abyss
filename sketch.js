@@ -1984,8 +1984,8 @@
     }else if(P3.beat===2){
       cue=P3.fusion?(P3.fusion.style==='surge'?'两道光带交汇，共振种子沿螺旋舒展':'两群微光相遇，共振种子正在诞生'):
         P3.merging?'让两群微光靠近，等待它们真正相遇':P3.splitReady?
-        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'回到标记的起点合拢；慢回或快回，会有不同回应'):'青蓝与金色正在游开，稍等它们形成双群'):
-        '单手向任一侧移动一小段即可分群，再回到起点合拢；也可用双手';
+        (P3.separated?(P3.splitMode==='dual'?'双手缓缓靠近，让两群微光交融':'把手掌往回移，让两群微光合拢'):'青蓝与金色正在游开，稍等它们形成双群'):
+        '单手向一侧移动一小段即可分群，再往回移让光群合拢。也可用双手分开、靠拢';
       progress=P3.fusion?(P3.fusion.style==='surge'?'螺旋交汇':'柔和交融'):
         P3.splitReady?(P3.separated?'双群已分开 · 等待合拢':'分群已响应 · 正在游开'):'分群相遇 · 孕育共振种子';
     }else if(P3.beat===3){
@@ -1996,7 +1996,7 @@
       progress='共振 '+mature+' / 3 · 本枚节拍 '+(r.steps||0)+' / 4 · 光灵 '+spirits.length+' · 保底 '+P3.target;
     }else{cue='光尘渐息，让新生的微光汇向深处';progress='光灵 '+spirits.length+' · 繁衍完成';}
     if(bloomMix<.85)cue='海盆渐渐展开，带着光群游向飘落的光尘';
-    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度与起点标记会保留':'请将手掌放回画面，进食与种子进度会保留';
+    else if(!active&&P3.beat!==4)cue=P3.beat===2?'请将手掌放回画面，分群进度会保留':'请将手掌放回画面，进食与种子进度会保留';
     herdCue.textContent=cue;herdProgress.textContent=progress;
     herdHud.classList.toggle('quiet',P3.beat===4&&P3.beatClock>8);
   }
@@ -2053,14 +2053,6 @@
           p.vertex(center.x+Math.cos(a)*r,center.y+Math.sin(a)*r*.75);
         }p.endShape();
       }
-    }
-    if(P3.beat===2&&P3.splitAnchor&&!P3.fusion&&!P3.merging){
-      var homeX=P3.splitAnchor.x*W,homeY=P3.splitAnchor.y*H,mark=Math.max(.65,u);
-      p.noFill();p.stroke(190,220,235,65*fade);p.strokeWeight(Math.max(.7,u));
-      p.circle(homeX,homeY,22*mark);
-      p.noStroke();p.fill(190,220,235,120*fade);p.textAlign(bloomP5.CENTER);
-      p.textFont('Microsoft YaHei');p.textSize(Math.max(10,11*u));
-      p.text('起点',homeX,homeY+26*mark);
     }
     if(P3.beat===2&&P3.split>.1&&!P3.fusion&&P3.centers){
       P3.centers.forEach(function(c,i){
